@@ -187,10 +187,7 @@ def main(
     split_ratio = 0.8,
     seed = 114514
 ):
-    seed = 114514
     set_seed(seed)
-
-    split_ratio = 0.8
     total_data_num = int(samples_per_config * len(x_params))
     test_batch_size = int(batch_size * ((1 - split_ratio) / split_ratio))
 
@@ -271,7 +268,7 @@ def main(
     checker = dde.callbacks.ModelCheckpoint(
         f"{path}/model",
         save_better_only=True,
-        period=1000,
+        period=2000,
     )
 
     plotter = PlottingCallback(
