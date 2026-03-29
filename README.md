@@ -35,7 +35,7 @@ python -m pip install -r requirements.txt
 
 ## Data Preparation
 
-This project expects SoS and K-Wave simulation outputs organized by parameter folders.
+This project expects SoS and K-Wave simulation outputs organized by parameter folders. You can generate the data using the code at <https://github.com/WangKaifeng22/DataGenerationForOnePatch.git>.
 
 Current scripts read dataset paths from Python variables (mainly in `src/my_train.py`):
 
