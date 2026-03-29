@@ -35,7 +35,7 @@ python -m pip install -r requirements.txt
 
 ## Data Preparation
 
-This project expects SoS and K-Wave simulation outputs organized by parameter folders (for example `xandIncy`).
+This project expects SoS and K-Wave simulation outputs organized by parameter folders.
 
 Current scripts read dataset paths from Python variables (mainly in `src/my_train.py`):
 
@@ -86,16 +86,13 @@ Supported model types:
 
 You can either modify the `__main__` block in `src/my_test.py` or call `main(...)` from your own script.
 
-## Notes on Local Modules
+## Modules not yet adapted:
 
-The repository includes optimizer/data helper modules used by training scripts:
+The following modules have not been validated for operation and may not work correctly.
 
 - `src/multi_data.py`
 - `src/soap.py`
 - `src/muon.py`
-- `src/debug_tools.py`
-
-They are project-specific implementations and may need adaptation for other datasets or distributed environments.
 
 ## Reproducibility Tips
 
