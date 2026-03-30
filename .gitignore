@@ -1,4 +1,6 @@
-/model_*/
+model_*/
 debug_sos_preview/
 grad_reports/
-_pycache_/
+__pycache__/
+reports/
+dataset_*
