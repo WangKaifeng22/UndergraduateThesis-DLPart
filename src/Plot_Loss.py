@@ -58,7 +58,8 @@ def plot_loss_history(
 
     plt.xlabel("iteration")
     plt.ylabel("loss")
-    plt.title(title)
+    if title is not None:
+        plt.title(title)
     plt.grid(True, linestyle="--", alpha=0.4)
     plt.legend()
 
@@ -79,13 +80,13 @@ def plot_loss_history(
 
 if __name__ == "__main__":
     # 例子：把这里改成你训练输出的 CSV 路径
-    csv_file = r"/home/wkf/wkf_kwave/src/model_20K_2.5and3.5_NIO/logs/loss_history.csv"
-    out_file = r"/home/wkf/wkf_kwave/src/model_20K_2.5and3.5_NIO/logs/loss.png"
+    csv_file = r"/home/wkf/wkf_kwave/src/model_20K_2.5and3.5_test0_0.125-0.4375/logs/loss_history.csv"
+    out_file = r"/home/wkf/wkf_kwave/src/model_20K_2.5and3.5_test0_0.125-0.4375/logs/loss.png"
 
     saved = plot_loss_history(
         csv_path=csv_file,
         out_path=out_file,
-        title="Loss(20K time-domain dataset, batch size=32)",
+        title=None,
         smooth_window=1,   # 0 或 1 表示不平滑
         use_logy=False,    # True 表示 y 轴对数
         show=False,

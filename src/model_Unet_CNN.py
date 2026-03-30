@@ -212,8 +212,8 @@ class decoder(nn.Module):
         self.fc1 = nn.Linear(self.width, int(self.width * 2))
         self.fc2 = nn.Linear(int(self.width * 2), 1)
 
-        """self.out_conv1 = nn.Conv2d(self.width, int(self.width * 2), kernel_size=3, padding=1, bias = False)
-        self.out_conv2 = nn.Conv2d(int(self.width * 2), 1, kernel_size=1, bias = False)"""
+        self.out_conv1 = nn.Conv2d(self.width, int(self.width * 2), kernel_size=3, padding=1, bias = False)
+        self.out_conv2 = nn.Conv2d(int(self.width * 2), 1, kernel_size=1, bias = False)
 
         #self.gn_b0 = nn.GroupNorm(num_groups=32, num_channels=self.width)
         self.gn_b1 = nn.GroupNorm(num_groups=32, num_channels=self.width)

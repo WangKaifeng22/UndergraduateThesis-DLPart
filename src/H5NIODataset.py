@@ -49,11 +49,9 @@ class H5NIODataset(dde.data.Data):
         self._y = None
 
         self.split_idx = int(self.n * cfg.split_ratio)
-        np.random.seed(seed)
-        shuffled_indices = np.random.permutation(self.n)
-
-        self.train_indices = np.sort(shuffled_indices[:self.split_idx])
-        self.test_indices = np.sort(shuffled_indices[self.split_idx:])
+        indices = range(0, self.n)
+        self.train_indices = np.array(indices[:self.split_idx])
+        self.test_indices = np.array(indices[self.split_idx:])
 
         self.train_sampler = dde.data.BatchSampler(len(self.train_indices), shuffle=False)
         self.test_sampler = dde.data.BatchSampler(len(self.test_indices), shuffle=False)
