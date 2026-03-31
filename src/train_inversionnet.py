@@ -9,8 +9,108 @@ from utils import *
 from deepxde.callbacks import Callback
 from soap import SOAP
 from muon import MuonWithAuxAdam
-from my_train import LossHistoryCallback
 import json
+import time
+from h5_dataset import H5DeepONetDataset, H5DatasetConfig
+
+
+class LossHistoryCallback(Callback):
+    def __init__(self, period=500, save_dir="./training_logs", filename="loss_history", start_iteration=0):
+        super().__init__()
+        self.period = period
+        self.save_dir = save_dir
+        self.filename = filename
+        self.start_iteration = start_iteration
+        os.makedirs(self.save_dir, exist_ok=True)
+        self.filepath = os.path.join(self.save_dir, f"{self.filename}.csv")
+        if not os.path.exists(self.filepath):
+            with open(self.filepath, "w", encoding="utf-8") as f:
+                f.write("iteration,loss_train,loss_test\n")
+
+    def on_epoch_end(self):
+        iteration = self.model.train_state.iteration + self.start_iteration
+        if iteration % self.period != 0:
+            return
+        loss_train = self.model.train_state.loss_train
+        loss_test = self.model.train_state.loss_test
+        loss_train_mean = float(np.mean(loss_train)) if loss_train is not None else np.nan
+        loss_test_mean = float(np.mean(loss_test)) if loss_test is not None else np.nan
+        with open(self.filepath, "a", encoding="utf-8") as f:
+            f.write(f"{iteration},{loss_train_mean},{loss_test_mean}\n")
+
+
+class TimingCallback(Callback):
+    def __init__(self, period=1, save_dir="./training_logs", filename="iter_time", start_iteration=0, sync_cuda=True):
+        super().__init__()
+        self.period = period
+        self.save_dir = save_dir
+        self.filename = filename
+        self.start_iteration = start_iteration
+        self.sync_cuda = sync_cuda
+        self._t0 = None
+        os.makedirs(self.save_dir, exist_ok=True)
+        self.filepath = os.path.join(self.save_dir, f"{self.filename}.csv")
+        if not os.path.exists(self.filepath):
+            with open(self.filepath, "w", encoding="utf-8") as f:
+                f.write("iteration,wall_time_sec\n")
+
+    def _maybe_sync(self):
+        if not self.sync_cuda:
+            return
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
+    def on_epoch_begin(self):
+        self._maybe_sync()
+        self._t0 = time.perf_counter()
+
+    def on_epoch_end(self):
+        if self._t0 is None:
+            return
+        self._maybe_sync()
+        dt = time.perf_counter() - self._t0
+        iteration = self.model.train_state.iteration + self.start_iteration
+        if iteration % self.period != 0:
+            return
+        with open(self.filepath, "a", encoding="utf-8") as f:
+            f.write(f"{iteration},{dt:.6f}\n")
+
+
+def preflight_check_single_input(X_test, y_test, name="test", vis_index=0, save_path="./test.png", dpi=300):
+    X = np.asarray(X_test)
+    y = np.asarray(y_test)
+
+    assert X.ndim >= 2, f"X_test ndim too small: {X.ndim}"
+    assert y.ndim >= 2, f"y_test ndim too small: {y.ndim}"
+    assert X.shape[0] == y.shape[0], f"Batch mismatch: X={X.shape[0]}, y={y.shape[0]}"
+
+    assert np.isfinite(X).all(), "X_test contains NaN/Inf"
+    assert np.isfinite(y).all(), "y_test contains NaN/Inf"
+
+    print(f"[{name}] X_test shape={X.shape}, dtype={X.dtype}, min={X.min():.6g}, max={X.max():.6g}")
+    print(f"[{name}] y_test shape={y.shape}, dtype={y.dtype}, min={y.min():.6g}, max={y.max():.6g}")
+
+    idx = int(np.clip(vis_index, 0, X.shape[0] - 1))
+    y_vis = minmax_denormalize(y[idx].squeeze(), VMIN, VMAX, 2)
+    x_vis = X[idx]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+    im0 = axes[0].imshow(y_vis, cmap="jet", origin="lower")
+    axes[0].set_title(f"y sample={idx}")
+    fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
+    x_slice = x_vis[0] if x_vis.ndim >= 3 else np.squeeze(x_vis)
+    im1 = axes[1].imshow(x_slice, cmap="viridis", aspect="auto")
+    axes[1].set_title(f"X sample={idx} slice")
+    fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+    plt.tight_layout()
+    out_dir = os.path.dirname(save_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    fig.savefig(save_path, dpi=int(dpi), bbox_inches="tight")
+    plt.close(fig)
+    print(f"[{name}] saved preflight figure to: {save_path}")
 
 class PlottingCallback(Callback):
     def __init__(self, X_test, y_test, period=1000, save_dir="./training_plots", filename="it", start_iteration=0):
@@ -106,18 +206,70 @@ class Dataset(dde.data.Data):
         y_test_batch = self.test_y[indices]
         return X_test_batch, y_test_batch
 
+from my_train import samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
 
 
-def main(dataset, task, resume_training=False, batch_size=8):
-    seed = 114514
+def main(
+    dataset,
+    task,
+    batch_size=32,
+    lazy: bool = False,
+    test=False,
+    model_path=None,
+    path=None,
+    start_iteration=0,
+    total_epoch=250,
+    enable_timing=True,
+    split_ratio=0.8,
+    seed=114514,
+    optimizer_name="adamw",
+    #resume_training=False,
+):
+    if path is None:
+        path = f"./model_{dataset}_{task}_InversionNet_4"
+
+    os.makedirs(path, exist_ok=True)
+    os.makedirs(os.path.join(path, "model"), exist_ok=True)
+
     set_seed(seed)
-    split_ratio = 0.96
-    total_data_num = 100
 
-    X_train, X_test, y_train, y_test = get_dataset(split_ratio, total_data_num, is_deeponet = False)
+    total_data_num = int(samples_per_config * len(x_params))
+    test_batch_size = max(1, int(batch_size * ((1 - split_ratio) / split_ratio)))
 
-    # 创建Dataset实例
-    data = Dataset(X_train, y_train, X_test, y_test, test_batch_size=4)
+    if lazy:
+        print(f"Using HDF5 cache dataset: {cache_h5_path}")
+        data = H5DeepONetDataset(
+            H5DatasetConfig(
+                h5_path=cache_h5_path,
+                split_ratio=split_ratio,
+                test_batch_size=test_batch_size,
+                total_data_num=total_data_num,
+            ),
+            is_deeponet=False,
+            seed=seed,
+            enable_timing=enable_timing,
+        )
+        X_test, y_test = data.test()
+    else:
+        X_train, X_test, y_train, y_test = get_dataset(
+            split_ratio,
+            samples_per_config,
+            False,
+            x_params=x_params,
+            y_params=y_params,
+            cache_h5_path=cache_h5_path,
+            h5_start=0,
+            h5_stop=total_data_num,
+            sos_root=sos_root,
+            kwave_root=kwave_root,
+        )
+        data = Dataset(X_train, y_train, X_test, y_test, test_batch_size=test_batch_size)
+
+    if test:
+        preflight_check_single_input(X_test, y_test, name="test", vis_index=0, save_path=f"{path}/preflight_test.png")
+        if lazy:
+            data.close()
+        return
 
     # 超参
     dim0 = 64; dim1 = 64; dim2 = 64; dim3 = 128; dim4 = 256; dim5 = 512; regularization = ["l2", 3e-6]
@@ -125,11 +277,6 @@ def main(dataset, task, resume_training=False, batch_size=8):
     # --- 修改点 5: 初始化 InversionNet ---
     net = InversionNet(dim0=dim0, dim1=dim1, dim2=dim2, dim3=dim3, dim4=dim4, dim5=dim5, regularization=regularization)
     model = dde.Model(data, net)
-
-    path = f'./model_{dataset}_{task}_InversionNet_4'
-    os.makedirs(path, exist_ok=True)
-    ckpt_dir = os.path.join(path, "model")
-    os.makedirs(ckpt_dir, exist_ok=True)
 
     # --- NEW: save model build config before training (no weights) ---
     model_config = {
@@ -143,16 +290,17 @@ def main(dataset, task, resume_training=False, batch_size=8):
             "dim5": dim5,
             "regularization": regularization,
         },
+        "data": {
+            "split_ratio": split_ratio,
+            "samples_per_config": samples_per_config,
+        },
     }
     with open(os.path.join(path, "model_config.json"), "w", encoding="utf-8") as f:
         json.dump(model_config, f, ensure_ascii=False, indent=2)
 
-    # Optimizer 配置
-    optimizer_name = "adam"
-
     if optimizer_name == "soap":
         optimizer = SOAP(
-            model.parameters(),
+            net.parameters(),
             lr=2e-3, betas=(0.95, 0.95), shampoo_beta=0.99, eps=1e-8,
             weight_decay=0.01, precondition_frequency=10, max_precond_dim=4096,  # 调小 dim 省显存
             merge_dims=True, precondition_1d=False, normalize_grads=False,
@@ -197,39 +345,84 @@ def main(dataset, task, resume_training=False, batch_size=8):
     else:
         raise NotImplementedError(f"Optimizer {optimizer_name} not implemented.")
 
-    model.compile(optimizer=optimizer, lr=1e-3, loss=loss_func_L1, decay=("step", 5000, 0.9),
-                  metrics=[lambda y_true, y_pred: np.mean(np.abs(y_true - y_pred))])  # MAE
-
-    checker = dde.callbacks.ModelCheckpoint(f"{path}/model", save_better_only=False, period=5000)
-
-    plotter = PlottingCallback(X_test, y_test, period=2500, save_dir=f"{path}/plots",)
-
-    log_period = 500
-    start_iteration = 0
-    loss_logger = LossHistoryCallback(period=log_period + start_iteration, save_dir=f"{path}/logs")
-
-    total_epoch = 5000
     iterations_per_epoch = (total_data_num + batch_size - 1) // batch_size
     total_iterations = total_epoch * iterations_per_epoch
     remaining_iterations = total_iterations - start_iteration
 
+    model.compile(
+        optimizer=optimizer,
+        lr=1e-3,
+        loss=loss_func_L1,
+        decay=(
+            "lambda",
+            lambda step: large_dataset_schedule(
+                step=step,
+                total_steps=total_iterations,
+                total_epochs=total_epoch,
+                start_it=start_iteration,
+            ),
+        ),
+        metrics=[
+            lambda y_true, y_pred: np.mean(np.abs(y_true - y_pred)),
+            lambda y_true, y_pred: np.sqrt(np.mean((y_true - y_pred) ** 2)),
+        ],
+    )
+
+    checker = dde.callbacks.ModelCheckpoint(f"{path}/model", save_better_only=True, period=2000)
+
+    plotter = PlottingCallback(X_test, y_test, period=1000, save_dir=f"{path}/plots", start_iteration=start_iteration)
+
+    log_period = 50
+    loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
+
+    timing_logger = None
+    if enable_timing:
+        timing_logger = TimingCallback(period=1, save_dir=f"{path}/logs", start_iteration=start_iteration, sync_cuda=True)
+
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    model_path=None
+    if remaining_iterations > 0:
+        callbacks = [checker, plotter, loss_logger]
+        if timing_logger is not None:
+            callbacks.append(timing_logger)
 
-    losshistory, train_state = model.train(
-        iterations=remaining_iterations,
-        batch_size=batch_size,
-        display_every=log_period,
-        callbacks=[checker, plotter, loss_logger],
-        model_save_path=f"{path}/model",
-        disregard_previous_best=True,
-        model_restore_path=model_path
-    )
+        losshistory, train_state = model.train(
+            iterations=remaining_iterations,
+            batch_size=batch_size,
+            display_every=log_period,
+            callbacks=callbacks,
+            model_save_path=f"{path}/model",
+            disregard_previous_best=True,
+            model_restore_path=model_path,
+        )
 
-    dde.saveplot(losshistory, train_state, issave=True, isplot=True)
+        # dde.saveplot(losshistory, train_state, issave=True, isplot=True)
+    else:
+        print("Training already completed!")
+
+    if lazy:
+        data.close()
 
 
 if __name__ == "__main__":
-    main(dataset="3e-3", task="Inc2e-3", batch_size=8)
+    dataset = "3e-3"
+    task = "Inc2e-3"
+    path = f"./model_{dataset}_{task}_InversionNet"
+    os.makedirs(path, exist_ok=True)
+
+    main(
+        dataset=dataset,
+        task=task,
+        batch_size=32,
+        lazy=True,
+        test=False,
+        model_path=None,
+        path=path,
+        start_iteration=0,
+        total_epoch=200,
+        enable_timing=False,
+        split_ratio=0.9,
+        seed=114514,
+        optimizer_name="adamw",
+    )
