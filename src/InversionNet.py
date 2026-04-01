@@ -77,17 +77,17 @@ class InversionNet(nn.Module):
         self.regularizer = regularization
 
         # ================= Encoder (保持你的修改) =================
-        # Input: [B, 64, 32, 1024]
+        # Input: [B, 32, 32, 1900]
 
         # Layer 1-3 (长方形特征，不参与 Skip Connection)
-        self.convblock1 = ConvBlock(64, dim1, kernel_size=(3, 7), stride=(1, 4), padding=(1, 3))
+        self.convblock1 = ConvBlock(32, dim1, kernel_size=(3, 7), stride=(1, 4), padding=(1, 3))
         self.convblock2_1 = ConvBlock(dim1, dim2, kernel_size=(3, 3), stride=(1, 2), padding=(1, 1))
         self.convblock2_2 = ConvBlock(dim2, dim2, kernel_size=(3, 3), padding=(1, 1))
         self.convblock3_1 = ConvBlock(dim2, dim2, kernel_size=(3, 3), stride=(1, 2), padding=(1, 1))
         self.convblock3_2 = ConvBlock(dim2, dim2, kernel_size=(3, 3), padding=(1, 1))
 
         # Layer 4 (正方形 32x32, 保存特征 e4)
-        self.convblock4_1 = ConvBlock(dim2, dim3, kernel_size=(3, 3), stride=(1, 2), padding=(1, 1))
+        self.convblock4_1 = ConvBlock(dim2, dim3, kernel_size=(3, 3), stride=(1, 4), padding=(1, 4))
         self.convblock4_2 = ConvBlock(dim3, dim3, kernel_size=(3, 3), padding=(1, 1))
 
         # Layer 5 (正方形 16x16, 保存特征 e5)
@@ -128,19 +128,18 @@ class InversionNet(nn.Module):
         # 输入通道: dim2 (上层) + dim3 (e4)
         self.deconv4_2 = ConvBlock(dim2 + dim3, dim2)
 
-        # --- 以下层不进行拼接，负责将 32x32 放大到 384x384 ---
+        # --- 以下层不进行拼接，负责将 32x32 放大到 80x80 ---
 
-        # Decoder 5: 32x32 -> 64x64 (Scale 2)
-        self.deconv5_1 = DeconvBlock(dim2, dim1, kernel_size=4, stride=2, padding=1)
+        # Decoder 5: 32x32 -> 40x40
+        self.deconv5_1 = DeconvBlock(dim2, dim1, kernel_size=9, stride=1, padding=0)
         self.deconv5_2 = ConvBlock(dim1, dim1)
 
-        # Decoder 6: 64x64 -> 128x128 (Scale 2)
+        # Decoder 6: 40x40 -> 80x80
         self.deconv6_1 = DeconvBlock(dim1, dim0, kernel_size=4, stride=2, padding=1)
         self.deconv6_2 = ConvBlock(dim0, dim0)
 
-        # Decoder 7: 128x128 -> 384x384 (Scale 3)
-        # Kernel=5, Stride=3, Pad=1 => (128-1)*3 - 2 + 5 = 381 + 3 = 384
-        self.deconv7_1 = DeconvBlock(dim0, dim0, kernel_size=5, stride=3, padding=1)
+        # Decoder 7: 80x80 -> 80x80 (keep size)
+        self.deconv7_1 = DeconvBlock(dim0, dim0, kernel_size=3, stride=1, padding=1)
         self.deconv7_2 = ConvBlock(dim0, dim0)
 
         # Output
@@ -258,11 +257,11 @@ def check_gradients():
 
     model = InversionNet().to(device)
 
-    # 模拟输入 (Batch=2, Channels=64, H=32, W=1024)
-    x = torch.randn((2, 64, 32, 1024)).to(device)
+    # 模拟输入 (Batch=2, Channels=32, H=32, W=1900)
+    x = torch.randn((2, 32, 32, 1900)).to(device)
 
-    # 模拟目标 (Batch=2, H=384, W=384)
-    target = torch.randn((2, 384, 384)).to(device)
+    # 模拟目标 (Batch=2, H=80, W=80)
+    target = torch.randn((2, 80, 80)).to(device)
 
     # 2. 前向传播
     model.zero_grad()
@@ -285,12 +284,12 @@ if __name__ == "__main__":
     check_gradients()
 
     """# Test
-    x = torch.randn((2, 64, 32, 1024))
+    x = torch.randn((2, 32, 32, 1900))
     model = InversionNet()
     out = model(x)
     print("Input:", x.shape)
     print("Output:", out.shape)
 
     # Check dims
-    assert out.shape[1:] == (384, 384)
+    assert out.shape[1:] == (80, 80)
     print("Passed!")"""

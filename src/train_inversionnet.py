@@ -406,8 +406,8 @@ def main(
 
 
 if __name__ == "__main__":
-    dataset = "3e-3"
-    task = "Inc2e-3"
+    dataset = "50K"
+    task = "5x2_configs"
     path = f"./model_{dataset}_{task}_InversionNet"
     os.makedirs(path, exist_ok=True)
 
