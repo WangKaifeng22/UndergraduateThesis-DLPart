@@ -84,6 +84,27 @@ def _metric_mean_std(values):
     return float(np.mean(values)), float(np.std(values))
 
 
+def _extract_nio_build_kwargs(model_init_kwargs):
+    """Build kwargs for build_nio from model_config.json, with safe defaults."""
+    defaults = {
+        "usct_hidden": 256,
+        "trunk_hidden_layers": 4,
+        "trunk_neurons": 128,
+        "trunk_n_basis": 256,
+        "fno_modes": 16,
+        "fno_width": 64,
+        "fno_n_layers": 4,
+    }
+    if not isinstance(model_init_kwargs, dict):
+        return defaults
+
+    out = defaults.copy()
+    for key in out.keys():
+        if key in model_init_kwargs and model_init_kwargs[key] is not None:
+            out[key] = int(model_init_kwargs[key])
+    return out
+
+
 def plot_velocity_comparison(
     y_true,
     y_pred,
@@ -366,12 +387,16 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
     elif model_type == "NIO":
         seed = 114514
         usct_time_steps = int(X_test[0].shape[-1])
-        usct_hidden = 256
+        nio_kwargs = _extract_nio_build_kwargs(model_init_kwargs)
         if isinstance(model_init_kwargs, dict):
             usct_time_steps = int(model_init_kwargs.get("usct_time_steps", usct_time_steps))
-            usct_hidden = int(model_init_kwargs.get("usct_hidden", usct_hidden))
 
-        net = build_nio(seed=seed, usct_time_steps=usct_time_steps, device=device, usct_hidden=usct_hidden)
+        net = build_nio(
+            seed=seed,
+            usct_time_steps=usct_time_steps,
+            device=device,
+            **nio_kwargs,
+        )
     else:
         raise ValueError(f"Unknown model_type={model_type!r}. Expected 'FourierDeepONet', 'InversionNet', or 'NIO'.")
 
@@ -500,8 +525,8 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
 
 if __name__ == "__main__":
-    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/model-296000.pt"
-    main(model_path=MODEL_PATH, result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/test_result_bestmodel",
-     model_type="FourierDeepONet", visualize=True, batch_size=32,
+    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO/model-240000.pt"
+    main(model_path=MODEL_PATH, result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO/test_result_bestmodel",
+     model_type="NIO", visualize=True, batch_size=32,
          split_ratio=0.9, total_data_num = 50000, is_deeponet=True
          ,sosmap_size=(80, 80), samples_plot=100, mm_per_pixel=0.1)
