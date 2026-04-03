@@ -238,9 +238,12 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
 
     # 超参
     width = 64; modes1 = 12; modes2 = 20; regularization = ["l2", 3e-6]; merge_operation = "mul"
+    use_hfs_block123 = True
+    hfs_patch_size = (16, 8, 4)
 
     net = FourierDeepONet(num_parameter=trunk_dim, width=width, modes1=modes1, modes2=modes2,
-                          regularization=regularization, merge_operation=merge_operation)
+                          regularization=regularization, merge_operation=merge_operation,
+                          use_hfs_block123=use_hfs_block123, hfs_patch_size=hfs_patch_size)
     model = dde.Model(data, net)
 
     # --- save model build config before training (no weights) ---
@@ -253,6 +256,8 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
             "modes2": modes2,
             "regularization": regularization,
             "merge_operation": merge_operation,
+            "use_hfs_block123": use_hfs_block123,
+            "hfs_patch_size": list(hfs_patch_size),
         },
         "data": {
             "cache_h5_path": cache_h5_path,
@@ -392,7 +397,7 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test0_0.140625-0.453125'
+    path = f'./model_{dataset}_{task}_test0_HFS_0.140625-0.453125'
     os.makedirs(path, exist_ok=True)
     main(dataset=dataset, task=task, batch_size=32, lazy=True, test=False,
          model_path=None, path=path, 

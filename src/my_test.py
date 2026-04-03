@@ -8,7 +8,9 @@ from model_Unet_CNN import FourierDeepONet
 from InversionNet import InversionNet
 from model_NIO import NIOUltrasoundCTAbl
 from train_NIO import build_nio
-from my_data import get_dataset
+from multi_data import get_dataset as get_multi_dataset
+from my_data import get_dataset as get_legacy_dataset
+from my_train import samples_per_config as train_samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
 from utils import *
 # HDF5 backed dataset (lazy loading)
 from h5_dataset import H5DeepONetDataset, H5DatasetConfig
@@ -355,8 +357,15 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
             total_data_num=total_data_num,
         )
         split_ratio = data_cfg.get("split_ratio", split_ratio)
+    elif model_type == "InversionNet":
+        samples_per_config = train_samples_per_config
+        if isinstance(data_cfg, dict):
+            samples_per_config = int(data_cfg.get("samples_per_config", samples_per_config))
+
+        X_test, y_true_orig = _load_full_h5_test_set(data_cfg, is_deeponet=False, batch_size=batch_size, total_data_num=total_data_num)
+
     else:
-        _, X_test, _, y_true_orig = get_dataset(split_ratio=split_ratio, total_data_num=total_data_num, is_deeponet=is_deeponet)
+        _, X_test, _, y_true_orig = get_legacy_dataset(split_ratio=split_ratio, total_data_num=total_data_num, is_deeponet=is_deeponet)
 
     print(f"Test Data Shape: {y_true_orig.shape}")
 
@@ -525,8 +534,8 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
 
 if __name__ == "__main__":
-    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO/model-240000.pt"
-    main(model_path=MODEL_PATH, result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO/test_result_bestmodel",
-     model_type="NIO", visualize=True, batch_size=32,
-         split_ratio=0.9, total_data_num = 50000, is_deeponet=True
+    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_InversionNet/model-298000.pt"
+    main(model_path=MODEL_PATH, result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_InversionNet/test_result_bestmodel",
+     model_type="InversionNet", visualize=True, batch_size=32,
+         split_ratio=0.9, total_data_num = 50000, is_deeponet=False
          ,sosmap_size=(80, 80), samples_plot=100, mm_per_pixel=0.1)

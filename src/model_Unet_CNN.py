@@ -16,6 +16,8 @@ class FourierDeepONet(dde.nn.pytorch.NN):
             modes2=20,
             regularization=None,
             merge_operation="mul",
+            use_hfs_block123=False,
+            hfs_patch_size=(16, 8, 4),
     ):
         super().__init__()
         self.num_parameter = num_parameter
@@ -24,7 +26,13 @@ class FourierDeepONet(dde.nn.pytorch.NN):
         self.modes2 = modes2
         self.branch = Branch(self.width)
         self.trunk = Trunk(self.width, self.num_parameter)
-        self.merger = decoder(self.modes1, self.modes2, self.width)
+        self.merger = decoder(
+            self.modes1,
+            self.modes2,
+            self.width,
+            use_hfs_block123=use_hfs_block123,
+            hfs_patch_size=hfs_patch_size,
+        )
         self.b = nn.Parameter(torch.tensor(0.0))
         self.regularizer = regularization
         self.merge_operation = merge_operation
@@ -159,29 +167,198 @@ class U_net(nn.Module):
 from torch.utils.checkpoint import checkpoint
 
 
+class featscale2(nn.Module):
+    def __init__(self, patch_size, channels):
+        super(featscale2, self).__init__()
+        self.patch_size = patch_size
+        self.lambda1 = nn.Parameter(torch.ones(1, channels, 1, 1, 1))
+        self.lambda2 = nn.Parameter(torch.ones(1, channels, 1, 1, 1))
+
+    def forward(self, x):
+        batch_size, channels, height, width = x.shape
+
+        # Fall back to identity when current feature map is not divisible by patch_size.
+        if height % self.patch_size != 0 or width % self.patch_size != 0:
+            return x
+
+        x_patches = x.unfold(2, self.patch_size, self.patch_size).unfold(3, self.patch_size, self.patch_size)
+        num_patches = (height // self.patch_size) * (width // self.patch_size)
+        x_patches = x_patches.reshape(batch_size, channels, num_patches, self.patch_size, self.patch_size)
+        x_mean_patch = x_patches.mean(dim=2)
+        x_mean_expanded = x_mean_patch.unsqueeze(2).expand(-1, -1, num_patches, -1, -1)
+
+        x_d = x_mean_expanded
+        x_h = x_patches - x_d
+
+        x_out = x_patches + self.lambda1 * x_d + self.lambda2 * x_h
+        x_out = x_out.reshape(
+            batch_size,
+            channels,
+            height // self.patch_size,
+            width // self.patch_size,
+            self.patch_size,
+            self.patch_size,
+        )
+        x_out = x_out.permute(0, 1, 2, 4, 3, 5).reshape(batch_size, channels, height, width)
+        return x_out
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, dropout_rate):
+        super(ResidualBlock, self).__init__()
+        padding = (kernel_size - 1) // 2
+
+        self.residual = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding),
+            nn.GroupNorm(1, out_channels),
+            nn.GELU(approximate='tanh'),
+            nn.Dropout(dropout_rate),
+            nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding),
+            nn.GroupNorm(1, out_channels),
+            nn.GELU(approximate='tanh'),
+            nn.Dropout(dropout_rate),
+        )
+
+        self.skip = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1),
+            nn.GroupNorm(1, out_channels),
+        )
+
+    def forward(self, x):
+        shortcut = self.skip(x)
+        out = self.residual(x)
+        return out + shortcut
+
+
+class ResidualBlock2(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, dropout_rate):
+        super(ResidualBlock2, self).__init__()
+        padding = (kernel_size - 1) // 2
+
+        self.residual = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding),
+            nn.GroupNorm(1, out_channels),
+            nn.GELU(approximate='tanh'),
+            nn.Dropout(dropout_rate),
+            nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding),
+            nn.GroupNorm(1, out_channels),
+            nn.GELU(approximate='tanh'),
+            nn.Dropout(dropout_rate),
+        )
+
+        self.skip = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1),
+            nn.GroupNorm(1, out_channels),
+        )
+
+    def forward(self, x):
+        shortcut = self.skip(x)
+        out = self.residual(x)
+        return out + shortcut
+
+
+class ResUNet(nn.Module):
+    def __init__(self, in_c, out_c, kernel_size=3, dropout_rate=0.0, patch_size=None):
+        super(ResUNet, self).__init__()
+        if patch_size is None:
+            patch_size = [16, 8, 4]
+
+        self.in_c = in_c
+        self.out_c = out_c
+        features = [out_c, out_c, out_c]
+        bottleneck_feature = out_c
+
+        self.encoder = nn.ModuleList()
+        self.featscale = nn.ModuleList()
+
+        current_in = in_c
+        for i, feature in enumerate(features):
+            self.encoder.append(ResidualBlock2(current_in, feature, kernel_size, dropout_rate))
+            self.featscale.append(featscale2(patch_size[i], feature))
+            current_in = feature
+
+        self.bottleneck = ResidualBlock2(features[-1], bottleneck_feature, kernel_size, dropout_rate)
+        self.fs_bottleneck = featscale2(patch_size=1, channels=bottleneck_feature)
+
+        self.upsample = nn.ModuleList()
+        self.decoder = nn.ModuleList()
+        self.featscale_up = nn.ModuleList()
+
+        current_bottleneck = bottleneck_feature
+        for i, feature in enumerate(reversed(features)):
+            self.upsample.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(current_bottleneck, current_bottleneck, kernel_size=4, stride=2, padding=1),
+                    nn.LeakyReLU(0.1, inplace=True),
+                )
+            )
+            self.decoder.append(ResidualBlock(current_bottleneck + feature, feature, kernel_size, dropout_rate))
+            self.featscale_up.append(featscale2(patch_size[-i - 1], feature))
+            current_bottleneck = feature
+
+        self.final_conv = nn.Conv2d(features[0] + self.in_c, self.out_c, kernel_size=1)
+
+    def forward(self, x):
+        x_original = x
+        skip_connections = []
+        for i, down in enumerate(self.encoder):
+            x = down(x)
+            x = self.featscale[i](x)
+            skip_connections.append(x)
+            x = F.max_pool2d(x, kernel_size=2)
+
+        x = self.bottleneck(x)
+        x = self.fs_bottleneck(x)
+
+        skip_connections = skip_connections[::-1]
+        for up in range(len(self.decoder)):
+            x = self.upsample[up](x)
+            x = torch.cat((x, skip_connections[up]), dim=1)
+            x = self.decoder[up](x)
+            x = self.featscale_up[up](x)
+
+        if x.shape != x_original.shape:
+            x = F.interpolate(x, size=x_original.shape[2:], mode='bilinear', align_corners=True)
+        x = torch.cat((x_original, x), dim=1)
+        out = self.final_conv(x)
+        return out
+
+
 class decoder(nn.Module):
-    def __init__(self, modes1, modes2, width):
+    def __init__(self, modes1, modes2, width, use_hfs_block123=False, hfs_patch_size=(16, 8, 4)):
         super(decoder, self).__init__()
 
         self.modes1 = modes1
         self.modes2 = modes2
         self.width = width
+        self.use_hfs_block123 = use_hfs_block123
+        self.hfs_patch_size = list(hfs_patch_size)
 
         # === 核心层定义 ===
         self.conv0 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
-        self.conv1 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
-        self.conv2 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
-        self.conv3 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
+        if not use_hfs_block123:
+            self.conv1 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
+            self.conv2 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
+            self.conv3 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
 
         self.w0 = nn.Conv2d(self.width, self.width, 1)
         self.w1 = nn.Conv2d(self.width, self.width, 1)
         self.w2 = nn.Conv2d(self.width, self.width, 1)
         self.w3 = nn.Conv2d(self.width, self.width, 1)
 
-        #self.unet0 = U_net(self.width, self.width, 3, 0)
-        self.unet1 = U_net(self.width, self.width, 3, 0)
-        self.unet2 = U_net(self.width, self.width, 3, 0)
-        self.unet3 = U_net(self.width, self.width, 3, 0)
+        if not use_hfs_block123:
+            #self.unet0 = U_net(self.width, self.width, 3, 0)
+            self.unet1 = U_net(self.width, self.width, 3, 0)
+            self.unet2 = U_net(self.width, self.width, 3, 0)
+            self.unet3 = U_net(self.width, self.width, 3, 0)
+        else:
+            # Dual-HFS replacements for Block1-3 (kept independent by design).
+            self.hfs1_a = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
+            self.hfs1_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
+            self.hfs2_a = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
+            self.hfs2_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
+            self.hfs3_a = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
+            self.hfs3_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
 
         self.linear0 = nn.Linear(1900, 1024)
         self.linear1 = nn.Linear(1024, 512)
@@ -250,10 +427,17 @@ class decoder(nn.Module):
 
     # === 辅助函数：Block 1 ===
     def _forward_block1(self, x):
-        
-        x1 = self.conv1(x)
-        x2 = self.w1(x)
-        x3 = self.unet1(x)
+
+        if self.use_hfs_block123:
+            x1 = self.hfs1_a(x)
+            x2 = self.w1(x)
+            x3 = self.hfs1_b(x)
+        else:
+            # Legacy path: keep original SpectralConv + U_net implementation for rollback.
+            x1 = self.conv1(x)
+            x2 = self.w1(x)
+            x3 = self.unet1(x)
+
         x = x1 + x2 + x3
         x = self.gn_b1(x)
         #x = self._resize_and_conv(x, (128, 512), self.resize_conv1)
@@ -262,10 +446,17 @@ class decoder(nn.Module):
 
     # === 辅助函数：Block 2  ===
     def _forward_block2(self, x):
-        
-        x1 = self.conv2(x)
-        x2 = self.w2(x)
-        x3 = self.unet2(x)
+
+        if self.use_hfs_block123:
+            x1 = self.hfs2_a(x)
+            x2 = self.w2(x)
+            x3 = self.hfs2_b(x)
+        else:
+            # Legacy path: keep original SpectralConv + U_net implementation for rollback.
+            x1 = self.conv2(x)
+            x2 = self.w2(x)
+            x3 = self.unet2(x)
+
         x = x1 + x2 + x3
         x = self.gn_b2(x)
         #x = self._resize_and_conv(x, (256, 384), self.resize_conv2)
@@ -276,10 +467,17 @@ class decoder(nn.Module):
         return x
     # === 辅助函数：Block 3 ===
     def _forward_block3(self, x):
-        
-        x1 = self.conv3(x)
-        x2 = self.w3(x)
-        x3 = self.unet3(x)
+
+        if self.use_hfs_block123:
+            x1 = self.hfs3_a(x)
+            x2 = self.w3(x)
+            x3 = self.hfs3_b(x)
+        else:
+            # Legacy path: keep original SpectralConv + U_net implementation for rollback.
+            x1 = self.conv3(x)
+            x2 = self.w3(x)
+            x3 = self.unet3(x)
+
         x = x1 + x2 + x3
         x = self.gn_b3(x)
         #x = self._resize_and_conv(x, (384, 384), self.resize_conv3)

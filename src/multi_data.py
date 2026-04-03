@@ -53,30 +53,48 @@ def load_kwave_dataset(sos_root_dir, result_root_dir, x_param_list, y_param_list
         max_tries = num_samples_per_config * 3
 
         while count_loaded < num_samples_per_config and idx <= max_tries:
-            x_path = os.path.join(current_result_dir, f"sample_KwaveData_{idx:06d}.mat")
-            y_path = os.path.join(current_sos_dir, f"sample_{idx:06d}.mat")
+            x_npz = os.path.join(current_result_dir, f"sample_{idx:06d}.npz")
+            y_npy = os.path.join(current_sos_dir, f"sample_{idx:06d}.npy")
+            x_mat = os.path.join(current_result_dir, f"sample_KwaveData_{idx:06d}.mat")
+            y_mat = os.path.join(current_sos_dir, f"sample_{idx:06d}.mat")
 
-            if (not os.path.exists(x_path)) or (not os.path.exists(y_path)):
-                if not os.path.exists(x_path):
-                    print(f"  File missing: {x_path}, skipping index.")
-                if not os.path.exists(y_path):
-                    print(f"  File missing: {y_path}, skipping index.")
+            if os.path.exists(x_npz) and os.path.exists(y_npy):
+                x_path = x_npz
+                y_path = y_npy
+            elif os.path.exists(x_mat) and os.path.exists(y_mat):
+                x_path = x_mat
+                y_path = y_mat
+            else:
+                if not os.path.exists(x_npz) and not os.path.exists(x_mat):
+                    print(f"  File missing: {x_npz} / {x_mat}, skipping index.")
+                if not os.path.exists(y_npy) and not os.path.exists(y_mat):
+                    print(f"  File missing: {y_npy} / {y_mat}, skipping index.")
                 idx += 1
                 continue
 
             try:
-                x_mat = scipy.io.loadmat(x_path)
-                sensor_data_complex = x_mat["freq_data_complex_cat"]
-                sensor_data_amp = np.concatenate(
-                    [np.real(sensor_data_complex), np.imag(sensor_data_complex)], axis=0
-                )
+                if x_path.endswith(".npz"):
+                    x_npz_data = np.load(x_path)
+                    sensor_data = x_npz_data["time_data_cat"]
+                    coords = x_npz_data["sensor_coords"].astype(np.float32).flatten("F")
+                else:
+                    x_mat_data = scipy.io.loadmat(x_path)
+                    if "time_data_cat" in x_mat_data:
+                        sensor_data = x_mat_data["time_data_cat"]
+                    else:
+                        sensor_data_complex = x_mat_data["freq_data_complex_cat"]
+                        sensor_data = np.concatenate(
+                            [np.real(sensor_data_complex), np.imag(sensor_data_complex)], axis=0
+                        )
+                    coords = x_mat_data["sensor_coords"].astype(np.float32).flatten("F")
 
-                coords = x_mat["sensor_coords"].astype(np.float32).flatten("F")
+                if y_path.endswith(".npy"):
+                    velocity_map = np.load(y_path).astype(np.float32)
+                else:
+                    mat_y = scipy.io.loadmat(y_path)
+                    velocity_map = mat_y["sample_data"].astype(np.float32)
 
-                mat_y = scipy.io.loadmat(y_path)
-                velocity_map = mat_y["sample_data"].astype(np.float32)
-
-                branch_list.append(unsqueeze(sensor_data_amp, 0))
+                branch_list.append(unsqueeze(sensor_data.astype(np.float32), 0))
                 trunk_list.append(unsqueeze(coords, 0))
                 y_list.append(unsqueeze(velocity_map, 0))
 

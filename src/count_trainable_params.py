@@ -81,6 +81,8 @@ def build_fourier_deeponet(
     modes2: int = 20,
     regularization: Optional[List[Any]] = None,
     merge_operation: str = "mul",
+    use_hfs_block123 = True,
+    hfs_patch_size = (16, 8, 4),
 ) -> torch.nn.Module:
     if regularization is None:
         regularization = ["l2", 3e-6]
@@ -91,6 +93,8 @@ def build_fourier_deeponet(
         modes2=modes2,
         regularization=regularization,
         merge_operation=merge_operation,
+        use_hfs_block123=use_hfs_block123,
+        hfs_patch_size=hfs_patch_size,
     )
 
 
