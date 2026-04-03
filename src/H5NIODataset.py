@@ -60,6 +60,7 @@ class H5NIODataset(dde.data.Data):
         self.prefetch_queue = queue.Queue(maxsize=2)
         self.prefetch_thread = None
         self._shutdown = False
+        self._prefetch_error = None
 
     def _prefetch_worker(self, batch_size):
         while not self._shutdown:
@@ -68,7 +69,32 @@ class H5NIODataset(dde.data.Data):
                 self.prefetch_queue.put(batch, block=True)
             except Exception as e:
                 if not self._shutdown:
-                    print(f"Prefetch error: {e}")
+                    self._prefetch_error = e
+                    self._shutdown = True
+                    try:
+                        # Sentinel to wake blocked consumer.
+                        self.prefetch_queue.put_nowait(None)
+                    except queue.Full:
+                        pass
+                break
+
+    @staticmethod
+    def _prepare_h5_indices(global_idx: np.ndarray):
+        """Prepare HDF5-safe indices and optional inverse mapping.
+
+        Fast path: already strictly increasing -> return as-is.
+        Slow path: sort+deduplicate for HDF5 read, then restore original order
+        with inverse map (supports duplicated indices).
+        """
+        idx = np.asarray(global_idx, dtype=np.int64).reshape(-1)
+        if idx.size <= 1:
+            return idx, None
+
+        if np.all(idx[1:] > idx[:-1]):
+            return idx, None
+
+        sorted_unique, inverse = np.unique(idx, return_inverse=True)
+        return sorted_unique, inverse
 
     def _ensure_file_open(self):
         if self._h5 is None:
@@ -85,6 +111,7 @@ class H5NIODataset(dde.data.Data):
 
     def close(self):
         self._shutdown = True
+        self._prefetch_error = None
         if self._h5 is not None:
             try:
                 self._h5.close()
@@ -109,6 +136,7 @@ class H5NIODataset(dde.data.Data):
         state["_h5"] = None
         state["_X_branch"] = None
         state["_y"] = None
+        state["_prefetch_error"] = None
         return state
 
     def losses(self, targets, outputs, loss_fn, inputs, model, aux=None):
@@ -117,8 +145,14 @@ class H5NIODataset(dde.data.Data):
     def _get_batch_by_global_indices(self, global_idx: np.ndarray):
         self._ensure_file_open()
 
-        Xb = np.array(self._X_branch[global_idx], dtype=np.float32)
-        y = np.array(self._y[global_idx], dtype=np.float32)
+        read_idx, inverse = self._prepare_h5_indices(global_idx)
+
+        Xb = np.array(self._X_branch[read_idx], dtype=np.float32)
+        y = np.array(self._y[read_idx], dtype=np.float32)
+
+        if inverse is not None:
+            Xb = Xb[inverse]
+            y = y[inverse]
 
         if self.squeeze_y_channel and y.ndim == 4 and y.shape[-1] == 1:
             y = np.squeeze(y, axis=-1)
@@ -146,7 +180,19 @@ class H5NIODataset(dde.data.Data):
             )
             self.prefetch_thread.start()
 
-        return self.prefetch_queue.get(block=True)
+        if self._prefetch_error is not None:
+            err = self._prefetch_error
+            self._prefetch_error = None
+            raise RuntimeError("Prefetch worker failed while loading HDF5 batch") from err
+
+        result = self.prefetch_queue.get(block=True)
+
+        if result is None and self._prefetch_error is not None:
+            err = self._prefetch_error
+            self._prefetch_error = None
+            raise RuntimeError("Prefetch worker failed while loading HDF5 batch") from err
+
+        return result
 
     def test(self):
         if len(self.test_indices) == 0:

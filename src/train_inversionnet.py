@@ -351,7 +351,7 @@ def main(
 
     model.compile(
         optimizer=optimizer,
-        lr=2.5e-3,
+        lr=2.5e-3, #1e-3
         loss=loss_func_L1,
         decay=(
             "lambda",

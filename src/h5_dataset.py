@@ -56,6 +56,7 @@ class H5DeepONetDataset(dde.data.Data):
         self.prefetch_queue = queue.Queue(maxsize=2)
         self.prefetch_thread = None
         self._shutdown = False
+        self._prefetch_error = None
 
     def _prefetch_worker(self, batch_size):
         """后台线程预取数据"""
@@ -65,7 +66,32 @@ class H5DeepONetDataset(dde.data.Data):
                 self.prefetch_queue.put(batch, block=True)
             except Exception as e:
                 if not self._shutdown:
-                    print(f"Prefetch error: {e}")
+                    self._prefetch_error = e
+                    self._shutdown = True
+                    try:
+                        # Sentinel to wake blocked consumer.
+                        self.prefetch_queue.put_nowait(None)
+                    except queue.Full:
+                        pass
+                break
+
+    @staticmethod
+    def _prepare_h5_indices(global_idx: np.ndarray):
+        """Prepare HDF5-safe indices and optional inverse mapping.
+
+        Fast path: already strictly increasing -> return as-is.
+        Slow path: sort+deduplicate for HDF5 read, and return inverse map
+        to restore original order (including duplicated indices).
+        """
+        idx = np.asarray(global_idx, dtype=np.int64).reshape(-1)
+        if idx.size <= 1:
+            return idx, None
+
+        if np.all(idx[1:] > idx[:-1]):
+            return idx, None
+
+        sorted_unique, inverse = np.unique(idx, return_inverse=True)
+        return sorted_unique, inverse
 
     def _ensure_file_open(self):
         """Lazy load the HDF5 file handle."""
@@ -84,6 +110,7 @@ class H5DeepONetDataset(dde.data.Data):
         
         # 1. 先停止预取线程（防止继续生产数据）
         self._shutdown = True
+        self._prefetch_error = None
         
         # 2. 清空队列以解除线程在 put() 上的阻塞
         # 线程可能在 queue.put(block=True) 处卡住，需要消费者取走数据或队列被清空
@@ -142,6 +169,7 @@ class H5DeepONetDataset(dde.data.Data):
         state['_X_branch'] = None
         state['_X_trunk'] = None
         state['_y'] = None
+        state['_prefetch_error'] = None
         return state
 
     def losses(self, targets, outputs, loss_fn, inputs, model, aux=None):
@@ -153,9 +181,16 @@ class H5DeepONetDataset(dde.data.Data):
         
         self._ensure_file_open()
 
-        Xb = self._X_branch[global_idx]
-        Xt = self._X_trunk[global_idx]
-        y = self._y[global_idx]
+        read_idx, inverse = self._prepare_h5_indices(global_idx)
+
+        Xb = self._X_branch[read_idx]
+        Xt = self._X_trunk[read_idx]
+        y = self._y[read_idx]
+
+        if inverse is not None:
+            Xb = Xb[inverse]
+            Xt = Xt[inverse]
+            y = y[inverse]
         
         # 仅在类型不匹配时转换，且尽量使用视图而非拷贝
         if Xb.dtype != np.float32:
@@ -207,8 +242,18 @@ class H5DeepONetDataset(dde.data.Data):
             )
             self.prefetch_thread.start()
 
+        if self._prefetch_error is not None:
+            err = self._prefetch_error
+            self._prefetch_error = None
+            raise RuntimeError("Prefetch worker failed while loading HDF5 batch") from err
+
         # 获取已预取的 batch
         result = self.prefetch_queue.get(block=True)
+
+        if result is None and self._prefetch_error is not None:
+            err = self._prefetch_error
+            self._prefetch_error = None
+            raise RuntimeError("Prefetch worker failed while loading HDF5 batch") from err
         
         # 仅在 verbose=True 时计算和打印时间
         if self._verbose:

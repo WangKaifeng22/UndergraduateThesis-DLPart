@@ -336,10 +336,9 @@ class decoder(nn.Module):
 
         # === 核心层定义 ===
         self.conv0 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
-        if not use_hfs_block123:
-            self.conv1 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
-            self.conv2 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
-            self.conv3 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
+        self.conv1 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)        
+        self.conv2 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
+        self.conv3 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
 
         self.w0 = nn.Conv2d(self.width, self.width, 1)
         self.w1 = nn.Conv2d(self.width, self.width, 1)
@@ -352,13 +351,12 @@ class decoder(nn.Module):
             self.unet2 = U_net(self.width, self.width, 3, 0)
             self.unet3 = U_net(self.width, self.width, 3, 0)
         else:
-            # Dual-HFS replacements for Block1-3 (kept independent by design).
             self.hfs1_a = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
-            self.hfs1_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
+            #self.hfs1_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
             self.hfs2_a = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
-            self.hfs2_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
+            #self.hfs2_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
             self.hfs3_a = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
-            self.hfs3_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
+            #self.hfs3_b = ResUNet(self.width, self.width, kernel_size=3, dropout_rate=0.0, patch_size=self.hfs_patch_size)
 
         self.linear0 = nn.Linear(1900, 1024)
         self.linear1 = nn.Linear(1024, 512)
@@ -429,9 +427,9 @@ class decoder(nn.Module):
     def _forward_block1(self, x):
 
         if self.use_hfs_block123:
-            x1 = self.hfs1_a(x)
+            x1 = self.conv1(x)
             x2 = self.w1(x)
-            x3 = self.hfs1_b(x)
+            x3 = self.hfs1_a(x)
         else:
             # Legacy path: keep original SpectralConv + U_net implementation for rollback.
             x1 = self.conv1(x)
@@ -448,9 +446,9 @@ class decoder(nn.Module):
     def _forward_block2(self, x):
 
         if self.use_hfs_block123:
-            x1 = self.hfs2_a(x)
+            x1 = self.conv2(x)
             x2 = self.w2(x)
-            x3 = self.hfs2_b(x)
+            x3 = self.hfs2_a(x)
         else:
             # Legacy path: keep original SpectralConv + U_net implementation for rollback.
             x1 = self.conv2(x)
@@ -469,9 +467,9 @@ class decoder(nn.Module):
     def _forward_block3(self, x):
 
         if self.use_hfs_block123:
-            x1 = self.hfs3_a(x)
+            x1 = self.conv3(x)
             x2 = self.w3(x)
-            x3 = self.hfs3_b(x)
+            x3 = self.hfs3_a(x)
         else:
             # Legacy path: keep original SpectralConv + U_net implementation for rollback.
             x1 = self.conv3(x)
