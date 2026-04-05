@@ -3,6 +3,7 @@ import os
 import json
 os.environ['DDE_BACKEND'] = 'pytorch'
 
+import h5py
 from matplotlib import colors
 from model_Unet_CNN import FourierDeepONet
 from InversionNet import InversionNet
@@ -10,7 +11,7 @@ from model_NIO import NIOUltrasoundCTAbl
 from train_NIO import build_nio
 from multi_data import get_dataset as get_multi_dataset
 from my_data import get_dataset as get_legacy_dataset
-from my_train import samples_per_config as train_samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
+from my_train import samples_per_config as train_samples_per_config
 from utils import *
 # HDF5 backed dataset (lazy loading)
 from h5_dataset import H5DeepONetDataset, H5DatasetConfig
@@ -86,6 +87,17 @@ def _metric_mean_std(values):
     return float(np.mean(values)), float(np.std(values))
 
 
+def _load_json_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _infer_sample_count(X_test, model_type):
+    if model_type in {"FourierDeepONet", "NIO"}:
+        return len(X_test[0])
+    return len(X_test)
+
+
 def _extract_nio_build_kwargs(model_init_kwargs):
     """Build kwargs for build_nio from model_config.json, with safe defaults."""
     defaults = {
@@ -114,8 +126,31 @@ def plot_velocity_comparison(
     save_path=None,
     sosmap_size=(80, 80),
     mm_per_pixel=1.0,
+    has_ground_truth=True,
 ):
     """绘制真实声速图与预测声速图的对比"""
+    if not has_ground_truth or y_true is None:
+        fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+        label_fontsize = 13
+        tick_fontsize = 12
+        mm_per_pixel = float(mm_per_pixel)
+        extent = [0.0, sosmap_size[1] * mm_per_pixel, 0.0, sosmap_size[0] * mm_per_pixel]
+        pred_2d = y_pred[sample_idx].reshape(sosmap_size)
+        im = ax.imshow(pred_2d, cmap='jet', vmin=VMIN, vmax=VMAX, origin='lower', extent=extent, aspect='auto')
+        ax.set_xlabel('Y (mm)', fontsize=label_fontsize)
+        ax.set_ylabel('X (mm)', fontsize=label_fontsize)
+        ax.tick_params(axis='both', labelsize=tick_fontsize)
+        cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Velocity (m/s)', fontsize=label_fontsize)
+        cbar.ax.tick_params(labelsize=tick_fontsize)
+        #ax.set_title('Predicted SoS')
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Saved: {save_path}")
+        plt.close(fig)
+        return
+
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     label_fontsize = 13
     tick_fontsize = 12
@@ -167,6 +202,8 @@ def plot_velocity_comparison(
 
 def plot_error_distribution(y_true, y_pred, save_path=None, sosmap_size=(80, 80)):
     """绘制误差分布统计"""
+    if y_true is None:
+        return
     errors = y_true - y_pred
     errors_flat = errors.flatten()
 
@@ -213,6 +250,12 @@ def plot_error_distribution(y_true, y_pred, save_path=None, sosmap_size=(80, 80)
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
+
+
+def _load_h5_meta(meta_path):
+    if not meta_path or not os.path.exists(meta_path):
+        return None
+    return _load_json_file(meta_path)
 
 
 def _load_full_h5_test_set(cfg, is_deeponet, batch_size, seed=114514, total_data_num = 0):
@@ -301,8 +344,9 @@ def _load_full_h5_test_set_nio(cfg, batch_size, grid_npy_path, seed=114514, tota
 
 def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
          batch_size=4, split_ratio=0.0, total_data_num=100, is_deeponet=True,
-         sosmap_size = (80, 80), samples_plot=50, save_npy=False,
-         mm_per_pixel=1.0):
+         sosmap_size=(80, 80), samples_plot=50, save_npy=False,
+         mm_per_pixel=1.0, cache_h5_path=None, cache_meta_path=None,
+         has_ground_truth=None):
     """
     主测试函数
     model_path: .pt 文件的完整路径
@@ -329,6 +373,26 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
         except Exception as e:
             print(f"Warning: failed to read model_config.json: {e}")
 
+    h5_meta = _load_h5_meta(cache_meta_path)
+    if isinstance(h5_meta, dict):
+        if has_ground_truth is None and "has_ground_truth" in h5_meta:
+            has_ground_truth = bool(h5_meta.get("has_ground_truth"))
+        if cache_h5_path is None and h5_meta.get("cache_h5_path"):
+            cache_h5_path = h5_meta.get("cache_h5_path")
+        if h5_meta.get("y_shape") and (has_ground_truth is False):
+            shape_tail = h5_meta.get("y_shape")[1:]
+            if len(shape_tail) == 2:
+                sosmap_size = (int(shape_tail[0]), int(shape_tail[1]))
+
+    if cache_h5_path is not None:
+        if data_cfg is None:
+            data_cfg = {}
+        data_cfg["cache_h5_path"] = cache_h5_path
+    if has_ground_truth is None and isinstance(data_cfg, dict):
+        has_ground_truth = bool(data_cfg.get("has_ground_truth", True))
+    if has_ground_truth is None:
+        has_ground_truth = True
+
     model_type_alias = {
         "FourierDeepONet": "FourierDeepONet",
         "InversionNet": "InversionNet",
@@ -339,6 +403,13 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
     print(f"--- 2. Loading Data ---")
     if model_type == "FourierDeepONet" and data_cfg is not None:
+        if total_data_num <= 0 and isinstance(h5_meta, dict):
+            total_data_num = int(h5_meta.get("num_samples", total_data_num))
+        if total_data_num <= 0 and data_cfg.get("cache_h5_path"):
+            with h5py.File(data_cfg["cache_h5_path"], "r") as f:
+                total_data_num = int(f["X_branch"].shape[0])
+        if has_ground_truth is False and isinstance(data_cfg, dict):
+            data_cfg["split_ratio"] = 0.0
         X_test, y_true_orig = _load_full_h5_test_set(data_cfg, is_deeponet=True, batch_size=batch_size, total_data_num=total_data_num)
         split_ratio = data_cfg.get("split_ratio", split_ratio)
     elif model_type == "NIO" and data_cfg is not None:
@@ -349,6 +420,14 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
             grid_npy_path = data_cfg.get("grid_npy_path")
         if not grid_npy_path:
             raise ValueError("NIO test requires 'grid_npy_path' in model_config.json.")
+
+        if total_data_num <= 0 and isinstance(h5_meta, dict):
+            total_data_num = int(h5_meta.get("num_samples", total_data_num))
+        if total_data_num <= 0 and data_cfg.get("cache_h5_path"):
+            with h5py.File(data_cfg["cache_h5_path"], "r") as f:
+                total_data_num = int(f["X_branch"].shape[0])
+        if has_ground_truth is False:
+            data_cfg["split_ratio"] = 0.0
 
         X_test, y_true_orig = _load_full_h5_test_set_nio(
             data_cfg,
@@ -362,15 +441,30 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
         if isinstance(data_cfg, dict):
             samples_per_config = int(data_cfg.get("samples_per_config", samples_per_config))
 
+        if total_data_num <= 0 and isinstance(h5_meta, dict):
+            total_data_num = int(h5_meta.get("num_samples", total_data_num))
+        if total_data_num <= 0 and data_cfg and data_cfg.get("cache_h5_path"):
+            with h5py.File(data_cfg["cache_h5_path"], "r") as f:
+                total_data_num = int(f["X_branch"].shape[0])
+        if has_ground_truth is False:
+            data_cfg["split_ratio"] = 0.0
+
         X_test, y_true_orig = _load_full_h5_test_set(data_cfg, is_deeponet=False, batch_size=batch_size, total_data_num=total_data_num)
 
     else:
         _, X_test, _, y_true_orig = get_legacy_dataset(split_ratio=split_ratio, total_data_num=total_data_num, is_deeponet=is_deeponet)
 
+    if not has_ground_truth and y_true_orig is not None and y_true_orig.ndim >= 3:
+        sosmap_size = (int(y_true_orig.shape[1]), int(y_true_orig.shape[2]))
+
     print(f"Test Data Shape: {y_true_orig.shape}")
 
-    length = len(y_true_orig) // batch_size
-    if len(y_true_orig) % batch_size != 0:
+    sample_count = len(y_true_orig)
+    if sample_count <= 0:
+        sample_count = _infer_sample_count(X_test, model_type)
+
+    length = sample_count // batch_size
+    if sample_count % batch_size != 0:
         length += 1
 
     print(f"--- 3. Building Model ---")
@@ -433,7 +527,7 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
     with torch.no_grad():
         for i in range(length):
             start = batch_size * i
-            end = min(batch_size * (i + 1), len(y_true_orig))
+            end = min(batch_size * (i + 1), sample_count)
 
             if model_type == "FourierDeepONet":
                 branch_batch = torch.as_tensor(X_test[0][start:end]).to(device)
@@ -453,8 +547,11 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
             outputs_np = outputs.cpu().numpy()
 
-            batch_loss = np.mean(np.abs(outputs_np.squeeze() - y_true_orig[start:end]))
-            print(f"Batch {i + 1}/{length} - L1 Loss (Normalized): {batch_loss:.6f}")
+            if has_ground_truth:
+                batch_loss = np.mean(np.abs(outputs_np.squeeze() - y_true_orig[start:end]))
+                print(f"Batch {i + 1}/{length} - L1 Loss (Normalized): {batch_loss:.6f}")
+            else:
+                print(f"Batch {i + 1}/{length} - inference only")
 
             y_pred_list.append(outputs_np)
 
@@ -468,74 +565,91 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
     print(f"--- 6. Denormalizing & Metrics ---")
     y_pred_real = minmax_denormalize(y_pred_norm, VMIN, VMAX, scale=2)
-    y_true_real = minmax_denormalize(y_true_orig, VMIN, VMAX, scale=2)
+    y_true_real = minmax_denormalize(y_true_orig, VMIN, VMAX, scale=2) if has_ground_truth else None
 
-    per_sample_mae = np.mean(np.abs(y_true_real - y_pred_real), axis=(1, 2))
-    per_sample_rmse = np.sqrt(np.mean((y_true_real - y_pred_real) ** 2, axis=(1, 2)))
+    mae_mean = mae_std = rmse_mean = rmse_std = ssim_mean = ssim_std = pcc_mean = pcc_std = l2_mean = l2_std = 0.0
+    if has_ground_truth:
+        per_sample_mae = np.mean(np.abs(y_true_real - y_pred_real), axis=(1, 2))
+        per_sample_rmse = np.sqrt(np.mean((y_true_real - y_pred_real) ** 2, axis=(1, 2)))
 
-    l2_list = []
-    for k in range(len(y_true_real)):
-        norm_true = np.linalg.norm(y_true_real[k])
-        norm_diff = np.linalg.norm(y_true_real[k] - y_pred_real[k])
-        l2_list.append(norm_diff / norm_true if norm_true > 0 else 0)
-    l2_rel_list = np.asarray(l2_list, dtype=np.float64)
+        l2_list = []
+        for k in range(len(y_true_real)):
+            norm_true = np.linalg.norm(y_true_real[k])
+            norm_diff = np.linalg.norm(y_true_real[k] - y_pred_real[k])
+            l2_list.append(norm_diff / norm_true if norm_true > 0 else 0)
+        l2_rel_list = np.asarray(l2_list, dtype=np.float64)
 
-    ssim_scores = compute_ssim_numpy(y_true_real, y_pred_real, data_range=VMAX - VMIN)
-    pcc_scores = compute_pcc_numpy(y_true_real, y_pred_real)
+        ssim_scores = compute_ssim_numpy(y_true_real, y_pred_real, data_range=VMAX - VMIN)
+        pcc_scores = compute_pcc_numpy(y_true_real, y_pred_real)
 
-    mae_mean, mae_std = _metric_mean_std(per_sample_mae)
-    rmse_mean, rmse_std = _metric_mean_std(per_sample_rmse)
-    ssim_mean, ssim_std = _metric_mean_std(ssim_scores)
-    pcc_mean, pcc_std = _metric_mean_std(pcc_scores)
-    l2_mean, l2_std = _metric_mean_std(l2_rel_list)
+        mae_mean, mae_std = _metric_mean_std(per_sample_mae)
+        rmse_mean, rmse_std = _metric_mean_std(per_sample_rmse)
+        ssim_mean, ssim_std = _metric_mean_std(ssim_scores)
+        pcc_mean, pcc_std = _metric_mean_std(pcc_scores)
+        l2_mean, l2_std = _metric_mean_std(l2_rel_list)
 
-    print(f"\n===== Evaluation Results =====")
-    print(f"MAE:  {mae_mean:.4f}±{mae_std:.4f} m/s")
-    print(f"RMSE: {rmse_mean:.4f}±{rmse_std:.4f} m/s")
-    print(f"SSIM: {ssim_mean:.4f}±{ssim_std:.4f}")
-    print(f"PCC:  {pcc_mean:.4f}±{pcc_std:.4f}")
-    print(f"L2 Rel: {l2_mean:.4%}±{l2_std:.4%}")
+        print(f"\n===== Evaluation Results =====")
+        print(f"MAE:  {mae_mean:.4f}±{mae_std:.4f} m/s")
+        print(f"RMSE: {rmse_mean:.4f}±{rmse_std:.4f} m/s")
+        print(f"SSIM: {ssim_mean:.4f}±{ssim_std:.4f}")
+        print(f"PCC:  {pcc_mean:.4f}±{pcc_std:.4f}")
+        print(f"L2 Rel: {l2_mean:.4%}±{l2_std:.4%}")
+    else:
+        print("\n===== Inference Mode =====")
+        print("No ground truth available. Metrics are skipped.")
 
     os.makedirs(result_dir, exist_ok=True)
     if save_npy:
         np.save(os.path.join(result_dir, "y_pred.npy"), y_pred_real)
-        np.save(os.path.join(result_dir, "y_true.npy"), y_true_real)
+        if has_ground_truth and y_true_real is not None:
+            np.save(os.path.join(result_dir, "y_true.npy"), y_true_real)
 
     if visualize:
         print(f"--- 7. Plotting ---")
         vis_dir = os.path.join(result_dir, 'plots')
         os.makedirs(vis_dir, exist_ok=True)
 
-        for i in range(min(samples_plot, len(y_true_real))):
+        for i in range(min(samples_plot, len(y_pred_real))):
             plot_velocity_comparison(
                 y_true_real, y_pred_real, sample_idx=i,
                 save_path=os.path.join(vis_dir, f'sample_{i}_comparison.png'),
                 sosmap_size=sosmap_size,
-                mm_per_pixel=mm_per_pixel
+                mm_per_pixel=mm_per_pixel,
+                has_ground_truth=has_ground_truth,
             )
 
-        plot_error_distribution(
-            y_true_real, y_pred_real,
-            save_path=os.path.join(vis_dir, 'error_analysis.png'),
-            sosmap_size=sosmap_size
-        )
+        if has_ground_truth and y_true_real is not None:
+            plot_error_distribution(
+                y_true_real, y_pred_real,
+                save_path=os.path.join(vis_dir, 'error_analysis.png'),
+                sosmap_size=sosmap_size
+            )
 
         with open(os.path.join(vis_dir, 'report.txt'), 'w') as f:
             f.write(f"Evaluation Report\n")
             f.write("=" * 30 + "\n")
             f.write(f"Model: {model_path}\n")
-            f.write(f"MAE: {mae_mean:.6f}±{mae_std:.6f} m/s\n")
-            f.write(f"RMSE: {rmse_mean:.6f}±{rmse_std:.6f} m/s\n")
-            f.write(f"SSIM: {ssim_mean:.6f}±{ssim_std:.6f}\n")
-            f.write(f"PCC: {pcc_mean:.6f}±{pcc_std:.6f}\n")
-            f.write(f"L2 Relative Error: {l2_mean:.6f}±{l2_std:.6f}\n")
+            f.write(f"Has Ground Truth: {has_ground_truth}\n")
+            f.write(f"Samples: {sample_count}\n")
+            if has_ground_truth:
+                f.write(f"MAE: {mae_mean:.6f}±{mae_std:.6f} m/s\n")
+                f.write(f"RMSE: {rmse_mean:.6f}±{rmse_std:.6f} m/s\n")
+                f.write(f"SSIM: {ssim_mean:.6f}±{ssim_std:.6f}\n")
+                f.write(f"PCC: {pcc_mean:.6f}±{pcc_std:.6f}\n")
+                f.write(f"L2 Relative Error: {l2_mean:.6f}±{l2_std:.6f}\n")
+            else:
+                f.write("Metrics: skipped because ground truth is unavailable\n")
 
         print(f"All results saved to: {vis_dir}")
 
 
 if __name__ == "__main__":
-    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_InversionNet/model-298000.pt"
-    main(model_path=MODEL_PATH, result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_InversionNet/test_result_bestmodel",
-     model_type="InversionNet", visualize=True, batch_size=32,
-         split_ratio=0.9, total_data_num = 50000, is_deeponet=False
-         ,sosmap_size=(80, 80), samples_plot=100, mm_per_pixel=0.1)
+    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/model-230000.pt"
+    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/test_result_realworld_230000"
+    main(model_path=MODEL_PATH, result_dir = result_dir,
+     model_type="FourierDeepONet", visualize=True, batch_size=32,
+         split_ratio=0, total_data_num = 597, is_deeponet=True
+         ,sosmap_size=(80, 80), samples_plot=597, mm_per_pixel=0.1,
+         cache_h5_path="/home/wkf/kwave-python/real-worldData/real_world_data.h5",
+         cache_meta_path="/home/wkf/kwave-python/real-worldData/real_world_data_meta.json",
+         has_ground_truth=False)

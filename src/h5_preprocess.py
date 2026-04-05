@@ -52,6 +52,11 @@ class H5PreprocessConfig:
     sos_crop_preview_dir: str | None = None
     sos_crop_preview_name: str = "sos_pov_preview.png"
     transducer_mask_path: str | None = None  # Optional path to .npy mask for transducer locations (same shape as SoS map)
+    # Inference-only mode: scan a single folder that contains sample_XXXXXX.npz files
+    # and write a placeholder y dataset for compatibility with existing H5 readers.
+    inference_mode: bool = False
+    inference_input_dir: str | None = None
+    inference_placeholder_y_shape: Tuple[int, int] | None = None
 
 
 def _iter_file_pairs(
@@ -90,6 +95,29 @@ def _iter_file_pairs(
                 yield x_mat, y_mat
                 count_loaded += 1
                 continue
+
+
+def _iter_inference_files(
+        inference_input_dir: str,
+) -> Iterable[str]:
+    if not os.path.exists(inference_input_dir):
+        raise FileNotFoundError(f"Inference input dir not found: {inference_input_dir}")
+
+    def _sort_key(path: str):
+        name = os.path.basename(path)
+        stem = os.path.splitext(name)[0]
+        if stem.startswith("sample_"):
+            suffix = stem[len("sample_"):]
+            if suffix.isdigit():
+                return (0, int(suffix), name)
+        return (1, name)
+
+    for name in sorted(os.listdir(inference_input_dir), key=_sort_key):
+        if not name.endswith(".npz"):
+            continue
+        if not name.startswith("sample_"):
+            continue
+        yield os.path.join(inference_input_dir, name)
 
 
 def _load_x_container(x_path: str) -> tuple[str, Any]:
@@ -244,10 +272,11 @@ def _extract_sensor_coords(x_kind: str, x_obj: Any) -> np.ndarray:
 
 def _probe_shapes(
         one_x_path: str,
-        one_y_path: str,
+    one_y_path: str | None,
         *,
         write_branch_time_domain: bool,
         sos_pov_indices: tuple[int, int, int, int] | None,
+    inference_placeholder_y_shape: tuple[int, int] | None = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
     """Infer output shapes for HDF5 datasets.
 
@@ -274,16 +303,21 @@ def _probe_shapes(
     coords = _extract_sensor_coords(x_kind, x_obj).astype(np.float32).flatten("F")
     trunk_shape = coords.shape
 
-    velocity_map = _load_y_array(one_y_path).astype(np.float32)
-    velocity_map = _apply_sos_pov_crop(velocity_map, sos_pov_indices)
-    y_shape = velocity_map.shape
+    if one_y_path is not None:
+        velocity_map = _load_y_array(one_y_path).astype(np.float32)
+        velocity_map = _apply_sos_pov_crop(velocity_map, sos_pov_indices)
+        y_shape = velocity_map.shape
+    else:
+        if inference_placeholder_y_shape is None:
+            raise ValueError("inference_placeholder_y_shape must be provided when no ground truth is available")
+        y_shape = tuple(int(v) for v in inference_placeholder_y_shape)
 
     return branch_shape, trunk_shape, y_shape
 
 
 def _process_one_pair(
         x_path: str,
-        y_path: str,
+    y_path: str | None,
         dtype_str: str,
         branch_scale: float,
         *,
@@ -293,13 +327,19 @@ def _process_one_pair(
         branch_log_vmin: float | None,
         branch_log_vmax: float | None,
         sos_pov_indices: tuple[int, int, int, int] | None,
+        inference_placeholder_y_shape: tuple[int, int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Worker-side: load two files and return normalized (X_branch, X_trunk, y)."""
     dtype = np.dtype(dtype_str)
 
     x_kind, x_obj = _load_x_container(x_path)
-    velocity_map = _load_y_array(y_path).astype(dtype)
-    velocity_map = _apply_sos_pov_crop(velocity_map, sos_pov_indices)
+    if y_path is not None:
+        velocity_map = _load_y_array(y_path).astype(dtype)
+        velocity_map = _apply_sos_pov_crop(velocity_map, sos_pov_indices)
+    else:
+        if inference_placeholder_y_shape is None:
+            raise ValueError("inference_placeholder_y_shape must be provided when y_path is None")
+        velocity_map = np.zeros(tuple(int(v) for v in inference_placeholder_y_shape), dtype=dtype)
 
     if write_branch_time_domain:
         if branch_vmin is None or branch_vmax is None:
@@ -345,29 +385,57 @@ def preprocess_to_h5(cfg: H5PreprocessConfig) -> None:
     if cfg.num_workers < 0:
         cfg.num_workers = os.cpu_count() or 1
 
+    if not cfg.out_h5_path:
+        raise ValueError("cfg.out_h5_path must be a non-empty path")
+    if not cfg.out_meta_path:
+        raise ValueError("cfg.out_meta_path must be a non-empty path")
+
     out_dir = os.path.dirname(os.path.abspath(cfg.out_h5_path))
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
     _validate_sos_pov_bounds(cfg.sos_pov_bounds_norm)
 
-    pairs = list(
-        _iter_file_pairs(
-            cfg.sos_root_dir,
-            cfg.result_root_dir,
-            cfg.x_param_list,
-            cfg.y_param_list,
-            cfg.samples_per_config,
-            cfg.max_tries_multiplier,
+    if cfg.inference_mode:
+        if not cfg.inference_input_dir:
+            raise ValueError("cfg.inference_input_dir must be provided when inference_mode=True")
+        x_paths = list(_iter_inference_files(cfg.inference_input_dir))
+        if len(x_paths) == 0:
+            raise ValueError(f"No sample_*.npz files found in inference_input_dir: {cfg.inference_input_dir}")
+        if cfg.samples_per_config > 0:
+            x_paths = x_paths[: cfg.samples_per_config]
+        pairs = [(x_path, None) for x_path in x_paths]
+    else:
+        pairs = list(
+            _iter_file_pairs(
+                cfg.sos_root_dir,
+                cfg.result_root_dir,
+                cfg.x_param_list,
+                cfg.y_param_list,
+                cfg.samples_per_config,
+                cfg.max_tries_multiplier,
+            )
         )
-    )
-    if len(pairs) == 0:
-        raise ValueError("No valid (x,y) .mat pairs found. Check paths and folder naming.")
+        if len(pairs) == 0:
+            raise ValueError("No valid (x,y) .mat pairs found. Check paths and folder naming.")
 
-    # Compute crop indices once (user guarantees identical SoS shape across samples).
-    first_velocity_map = _load_y_array(pairs[0][1]).astype(np.float32)
+    # Compute crop indices once.
+    # In paired mode, infer from the first GT SoS map.
+    # In inference mode, infer from placeholder y shape.
+    if cfg.inference_mode:
+        if cfg.inference_placeholder_y_shape is None:
+            raise ValueError("cfg.inference_placeholder_y_shape must be provided when inference_mode=True")
+        ph_h, ph_w = (int(cfg.inference_placeholder_y_shape[0]), int(cfg.inference_placeholder_y_shape[1]))
+        if ph_h <= 0 or ph_w <= 0:
+            raise ValueError(f"Invalid inference_placeholder_y_shape: {cfg.inference_placeholder_y_shape}")
+        first_velocity_map = np.zeros((ph_h, ph_w), dtype=np.float32)
+        first_velocity_src = "inference_placeholder_y_shape"
+    else:
+        first_velocity_map = _load_y_array(pairs[0][1]).astype(np.float32)
+        first_velocity_src = str(pairs[0][1])
+
     if first_velocity_map.ndim != 2:
-        raise ValueError(f"SoS map must be 2D, got shape {first_velocity_map.shape} from {pairs[0][1]}")
+        raise ValueError(f"SoS map must be 2D, got shape {first_velocity_map.shape} from {first_velocity_src}")
     sos_pov_indices = None
     if cfg.sos_pov_bounds_norm is not None:
         sos_pov_indices = _compute_pov_indices(
@@ -407,6 +475,7 @@ def preprocess_to_h5(cfg: H5PreprocessConfig) -> None:
         pairs[0][1],
         write_branch_time_domain=bool(cfg.write_branch_time_domain),
         sos_pov_indices=sos_pov_indices,
+        inference_placeholder_y_shape=cfg.inference_placeholder_y_shape,
     )
 
     n = len(pairs)
@@ -549,8 +618,13 @@ def preprocess_to_h5(cfg: H5PreprocessConfig) -> None:
         if not use_mp:
             for i, (x_path, y_path) in enumerate(pairs):
                 x_kind, x_obj = _load_x_container(x_path)
-                velocity_map = _load_y_array(y_path).astype(dtype)
-                velocity_map = _apply_sos_pov_crop(velocity_map, sos_pov_indices)
+                if y_path is not None:
+                    velocity_map = _load_y_array(y_path).astype(dtype)
+                    velocity_map = _apply_sos_pov_crop(velocity_map, sos_pov_indices)
+                else:
+                    if cfg.inference_placeholder_y_shape is None:
+                        raise RuntimeError("inference_placeholder_y_shape must be provided when inference_mode=True")
+                    velocity_map = np.zeros(tuple(int(v) for v in cfg.inference_placeholder_y_shape), dtype=dtype)
 
                 if cfg.write_branch_time_domain:
                     if branch_vmin is None or branch_vmax is None or branch_log_vmin is None or branch_log_vmax is None:
@@ -610,6 +684,7 @@ def preprocess_to_h5(cfg: H5PreprocessConfig) -> None:
                     branch_log_vmin=branch_log_vmin,
                     branch_log_vmax=branch_log_vmax,
                     sos_pov_indices=sos_pov_indices,
+                    inference_placeholder_y_shape=cfg.inference_placeholder_y_shape,
                 )
 
             with ProcessPoolExecutor(max_workers=int(cfg.num_workers)) as exe:
@@ -660,6 +735,10 @@ def preprocess_to_h5(cfg: H5PreprocessConfig) -> None:
         "branch_shape": [n, *branch_shape],
         "trunk_shape": [n, *trunk_shape],
         "y_shape": [n, *y_shape],
+        "has_ground_truth": not bool(cfg.inference_mode),
+        "input_mode": "inference_only_npz" if cfg.inference_mode else "paired_sos_kwave",
+        "inference_input_dir": cfg.inference_input_dir,
+        "inference_placeholder_y_shape": list(cfg.inference_placeholder_y_shape) if cfg.inference_placeholder_y_shape is not None else None,
         "dtype": cfg.dtype,
         "branch_domain": "time" if cfg.write_branch_time_domain else "freq_complex_concat",
         "branch_norm_method": "log_transform+minmax" if cfg.write_branch_time_domain else "max_abs_complex",
@@ -708,18 +787,21 @@ if __name__ == "__main__":
             x_param_list=x_params,
             y_param_list=y_params,
             samples_per_config=samples_per_config,
-            out_h5_path=cache_h5_path,
-            out_meta_path=meta_h5_path,
+            out_h5_path="/home/wkf/kwave-python/real-worldData/real_world_data.h5",
+            out_meta_path="/home/wkf/kwave-python/real-worldData/real_world_data_meta.json",
             num_workers=-1,
             write_branch_time_domain=True,
             shuffle=False,
-            shuffle_pairs=True,
+            shuffle_pairs=False, #打乱顺序
             shuffle_seed=114514,
-            sos_pov_bounds_norm=(0.140625, 0.453125, 0.33203125, 0.64453125),  # x范围, y范围（归一化）
-            sos_crop_preview_enabled=True,
+            sos_pov_bounds_norm=(0.140625, 0.453125, 0.33203125, 0.64453125),  # y范围, x范围（归一化）
+            sos_crop_preview_enabled=False,
             sos_crop_preview_dir="./debug_sos_preview",
             sos_crop_preview_name="first_sos_crop_0.140625-0.453125.png",
             transducer_mask_path="/home/wkf/kwave-python/temp/mask.npy",
+            inference_mode=True,
+            inference_input_dir="/home/wkf/kwave-python/real-worldData/npz_data",
+            inference_placeholder_y_shape=(80, 80),
         )
         preprocess_to_h5(cfg)
     except Exception as e:
