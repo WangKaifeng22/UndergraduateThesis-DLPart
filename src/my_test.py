@@ -645,11 +645,11 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
 if __name__ == "__main__":
     MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/model-230000.pt"
-    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/test_result_realworld_230000"
+    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/test_result_realworld_linear_230000"
     main(model_path=MODEL_PATH, result_dir = result_dir,
      model_type="FourierDeepONet", visualize=True, batch_size=32,
          split_ratio=0, total_data_num = 597, is_deeponet=True
          ,sosmap_size=(80, 80), samples_plot=597, mm_per_pixel=0.1,
-         cache_h5_path="/home/wkf/kwave-python/real-worldData/real_world_data.h5",
-         cache_meta_path="/home/wkf/kwave-python/real-worldData/real_world_data_meta.json",
+         cache_h5_path="/home/wkf/kwave-python/real-worldData/real_world_data_linear.h5",
+         cache_meta_path="/home/wkf/kwave-python/real-worldData/real_world_data_linear_meta.json",
          has_ground_truth=False)

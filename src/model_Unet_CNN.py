@@ -488,11 +488,11 @@ class decoder(nn.Module):
     def _forward_block4_out(self, x):
 
         # 2. 通道融合
-        x = x.permute(0, 2, 3, 1)  # (Batch, 384, 384, Width)
+        x = x.permute(0, 2, 3, 1)  # (Batch, Tx, T, Width)
         x = self.fc1(x)
         x = F.gelu(x, approximate='tanh')
-        x = self.fc2(x)  # (Batch, 384, 384, 1)
-        x = x.permute(0, 3, 1, 2)  # (Batch, 1, 384, 384)
+        x = self.fc2(x)  # (Batch, Tx, T, 1)
+        x = x.permute(0, 3, 1, 2)  # (Batch, 1, Tx, T)
 
         """x = self.out_conv1(x)
         x = F.gelu(x, approximate='tanh')
@@ -515,13 +515,8 @@ class Branch(nn.Module):
         super(Branch, self).__init__()
         self.width = width
         """self.net = nn.Sequential(
-            # 1. 投影
             nn.Conv2d(input_channels, self.width, kernel_size=1, bias=False),
-
-            # 2. 归一化: 强行把信号拉回标准正态分布，防止梯度消失
             nn.GroupNorm(num_groups=32, num_channels=self.width),
-
-            # 3. 激活: 增加非线性
             #nn.GELU(approximate='tanh')
         )"""
         self.fc = nn.Linear(32, self.width)
