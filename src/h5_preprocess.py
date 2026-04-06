@@ -787,19 +787,19 @@ if __name__ == "__main__":
             x_param_list=x_params,
             y_param_list=y_params,
             samples_per_config=samples_per_config,
-            out_h5_path="/home/wkf/kwave-python/real-worldData/real_world_data_linear.h5",
-            out_meta_path="/home/wkf/kwave-python/real-worldData/real_world_data_linear_meta.json",
+            out_h5_path="/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125_temp.h5", #"/home/wkf/kwave-python/real-worldData/real_world_data_linear.h5",
+            out_meta_path=meta_h5_path, #"/home/wkf/kwave-python/real-worldData/real_world_data_linear_meta.json",
             num_workers=-1,
             write_branch_time_domain=True,
             shuffle=False,
-            shuffle_pairs=False, #打乱顺序
+            shuffle_pairs=True, #打乱顺序
             shuffle_seed=114514,
             sos_pov_bounds_norm=(0.140625, 0.453125, 0.33203125, 0.64453125),  # y范围, x范围（归一化）
             sos_crop_preview_enabled=False,
             sos_crop_preview_dir="./debug_sos_preview",
             sos_crop_preview_name="first_sos_crop_0.140625-0.453125.png",
             transducer_mask_path="/home/wkf/kwave-python/temp/mask.npy",
-            inference_mode=True,
+            inference_mode=False,
             inference_input_dir="/home/wkf/kwave-python/real-worldData/npz_data_linear",
             inference_placeholder_y_shape=(80, 80),
         )

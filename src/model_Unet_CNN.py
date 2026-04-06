@@ -37,8 +37,7 @@ class FourierDeepONet(dde.nn.pytorch.NN):
         self.b = nn.Parameter(torch.tensor(0.0))
         self.regularizer = regularization
         self.merge_operation = merge_operation
-        #self.fusion_layer = nn.Conv2d(self.width * 2, self.width, kernel_size=1)
-
+        
     def forward(self, inputs):
         x1 = self.branch(inputs[0])
         x2 = self.trunk(inputs[1])
@@ -47,17 +46,6 @@ class FourierDeepONet(dde.nn.pytorch.NN):
             x = x1 + x2
         elif self.merge_operation == "mul":
             x = torch.mul(x1, x2)
-        elif self.merge_operation == "concat":
-            # Expand & Concat
-            target_h, target_w = x1.shape[2], x1.shape[3]
-            x2 = x2.expand(-1, -1, target_h, target_w)
-            x = torch.cat([x1, x2], dim=1)
-
-            # Fusion
-            x = self.fusion_layer(x)
-            x = F.gelu(x)
-
-            x = x
         else:
             raise NotImplementedError(
                 f"{self.merge_operation} operation to be implimented"
@@ -355,6 +343,13 @@ class FiLM(nn.Module):
         meta = meta.type_as(x)
         if meta.dim() == 1:
             meta = meta.unsqueeze(0)
+        elif meta.dim() > 2:
+            meta = meta.reshape(meta.shape[0], -1)
+
+        if meta.shape[-1] != self.meta_dim:
+            raise ValueError(
+                f"FiLM meta feature dim mismatch: expected {self.meta_dim}, got {meta.shape[-1]} with shape {tuple(meta.shape)}"
+            )
 
         weight = self.weight(meta)
         bias = self.bias(meta)
@@ -550,11 +545,6 @@ class Branch(nn.Module):
     def __init__(self, width, input_channels = 32):
         super(Branch, self).__init__()
         self.width = width
-        """self.net = nn.Sequential(
-            nn.Conv2d(input_channels, self.width, kernel_size=1, bias=False),
-            nn.GroupNorm(num_groups=32, num_channels=self.width),
-            #nn.GELU(approximate='tanh')
-        )"""
         self.fc = nn.Linear(32, self.width)
     def forward(self, x):
         x = x.permute(0, 3, 2, 1)  # -1, time_steps,R,32
