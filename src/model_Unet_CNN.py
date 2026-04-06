@@ -32,6 +32,7 @@ class FourierDeepONet(dde.nn.pytorch.NN):
             self.width,
             use_hfs_block123=use_hfs_block123,
             hfs_patch_size=hfs_patch_size,
+            meta_dim=self.num_parameter,
         )
         self.b = nn.Parameter(torch.tensor(0.0))
         self.regularizer = regularization
@@ -62,7 +63,7 @@ class FourierDeepONet(dde.nn.pytorch.NN):
                 f"{self.merge_operation} operation to be implimented"
             )
         x = x + self.b
-        x = self.merger(x)
+        x = self.merger(x, x2)
 
         return x
 
@@ -324,8 +325,49 @@ class ResUNet(nn.Module):
         return out
 
 
+class FiLM(nn.Module):
+    """Feature-wise Linear Modulation (FiLM) layer."""
+    def __init__(self, num_channels, meta_dim=64, norm_type='group', num_groups=32, eps=1e-6):
+        super().__init__()
+        self.num_channels = num_channels
+        self.meta_dim = meta_dim
+        self.norm_type = norm_type
+        self.eps = eps
+
+        if self.norm_type == 'group':
+            self.norm = nn.GroupNorm(num_groups, num_channels, eps=eps, affine=False)
+        elif self.norm_type == 'layer':
+            self.norm = nn.LayerNorm(num_channels, eps=eps, elementwise_affine=False)
+        elif self.norm_type == 'instance':
+            self.norm = nn.InstanceNorm1d(num_channels, eps=eps, affine=False)
+        else:
+            raise ValueError(f"norm_type must be 'group', 'layer', or 'instance', got {norm_type}")
+
+        self.weight = nn.Linear(meta_dim, num_channels)
+        self.bias = nn.Linear(meta_dim, num_channels)
+
+    def forward(self, x, meta=None):
+        x = self.norm(x)
+
+        if meta is None:
+            return x
+
+        meta = meta.type_as(x)
+        if meta.dim() == 1:
+            meta = meta.unsqueeze(0)
+
+        weight = self.weight(meta)
+        bias = self.bias(meta)
+
+        while weight.dim() < x.dim():
+            weight = weight.unsqueeze(-1)
+            bias = bias.unsqueeze(-1)
+
+        return weight * x + bias
+
+
 class decoder(nn.Module):
-    def __init__(self, modes1, modes2, width, use_hfs_block123=False, hfs_patch_size=(16, 8, 4)):
+    def __init__(self, modes1, modes2, width, use_hfs_block123=False, hfs_patch_size=(16, 8, 4), meta_dim=64):
         super(decoder, self).__init__()
 
         self.modes1 = modes1
@@ -333,6 +375,7 @@ class decoder(nn.Module):
         self.width = width
         self.use_hfs_block123 = use_hfs_block123
         self.hfs_patch_size = list(hfs_patch_size)
+        self.meta_dim = meta_dim
 
         # === 核心层定义 ===
         self.conv0 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
@@ -391,9 +434,9 @@ class decoder(nn.Module):
         self.out_conv2 = nn.Conv2d(int(self.width * 2), 1, kernel_size=1, bias = False)
 
         #self.gn_b0 = nn.GroupNorm(num_groups=32, num_channels=self.width)
-        self.gn_b1 = nn.GroupNorm(num_groups=32, num_channels=self.width)
-        self.gn_b2 = nn.GroupNorm(num_groups=32, num_channels=self.width)
-        self.gn_b3 = nn.GroupNorm(num_groups=32, num_channels=self.width)
+        self.film_b1 = FiLM(num_channels=self.width, meta_dim=self.meta_dim, norm_type='group')
+        self.film_b2 = FiLM(num_channels=self.width, meta_dim=self.meta_dim, norm_type='group')
+        self.film_b3 = FiLM(num_channels=self.width, meta_dim=self.meta_dim, norm_type='group')
 
     def _resize_and_conv(self, x, target_size, conv_layer):
         #x = F.gelu(x, approximate="tanh")
@@ -424,61 +467,54 @@ class decoder(nn.Module):
         return x
 
     # === 辅助函数：Block 1 ===
-    def _forward_block1(self, x):
+    def _forward_block1(self, x, meta=None):
 
         if self.use_hfs_block123:
             x1 = self.conv1(x)
             x2 = self.w1(x)
             x3 = self.hfs1_a(x)
         else:
-            # Legacy path: keep original SpectralConv + U_net implementation for rollback.
             x1 = self.conv1(x)
             x2 = self.w1(x)
             x3 = self.unet1(x)
 
         x = x1 + x2 + x3
-        x = self.gn_b1(x)
-        #x = self._resize_and_conv(x, (128, 512), self.resize_conv1)
+        x = self.film_b1(x, meta)
         x = self._linear_sampling(x, self.linear1, self.linear_R_1)
         return x
 
     # === 辅助函数：Block 2  ===
-    def _forward_block2(self, x):
+    def _forward_block2(self, x, meta=None):
 
         if self.use_hfs_block123:
             x1 = self.conv2(x)
             x2 = self.w2(x)
             x3 = self.hfs2_a(x)
         else:
-            # Legacy path: keep original SpectralConv + U_net implementation for rollback.
             x1 = self.conv2(x)
             x2 = self.w2(x)
             x3 = self.unet2(x)
 
         x = x1 + x2 + x3
-        x = self.gn_b2(x)
-        #x = self._resize_and_conv(x, (256, 384), self.resize_conv2)
-        #x = self._linear_sampling(x, self.linear2, self.linear_R_2)
+        x = self.film_b2(x, meta)
         x = self.linear2(x)
         x = F.gelu(x, approximate='tanh')
 
         return x
     # === 辅助函数：Block 3 ===
-    def _forward_block3(self, x):
+    def _forward_block3(self, x, meta=None):
 
         if self.use_hfs_block123:
             x1 = self.conv3(x)
             x2 = self.w3(x)
             x3 = self.hfs3_a(x)
         else:
-            # Legacy path: keep original SpectralConv + U_net implementation for rollback.
             x1 = self.conv3(x)
             x2 = self.w3(x)
             x3 = self.unet3(x)
 
         x = x1 + x2 + x3
-        x = self.gn_b3(x)
-        #x = self._resize_and_conv(x, (384, 384), self.resize_conv3)
+        x = self.film_b3(x, meta)
         x = self.linear3(x)
         x = F.gelu(x, approximate='tanh')
 
@@ -500,12 +536,12 @@ class decoder(nn.Module):
 
         return x.squeeze(1)
 
-    def forward(self, x):
+    def forward(self, x, meta=None):
 
         x = self._forward_block0(x)
-        x = self._forward_block1(x)
-        x = self._forward_block2(x)
-        x = self._forward_block3(x)
+        x = self._forward_block1(x, meta)
+        x = self._forward_block2(x, meta)
+        x = self._forward_block3(x, meta)
         x = self._forward_block4_out(x)
 
         return x
