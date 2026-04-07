@@ -32,7 +32,6 @@ class FourierDeepONet(dde.nn.pytorch.NN):
             self.width,
             use_hfs_block123=use_hfs_block123,
             hfs_patch_size=hfs_patch_size,
-            meta_dim=self.num_parameter,
         )
         self.b = nn.Parameter(torch.tensor(0.0))
         self.regularizer = regularization
@@ -362,7 +361,7 @@ class FiLM(nn.Module):
 
 
 class decoder(nn.Module):
-    def __init__(self, modes1, modes2, width, use_hfs_block123=False, hfs_patch_size=(16, 8, 4), meta_dim=64):
+    def __init__(self, modes1, modes2, width, use_hfs_block123=False, hfs_patch_size=(16, 8, 4)):
         super(decoder, self).__init__()
 
         self.modes1 = modes1
@@ -370,7 +369,7 @@ class decoder(nn.Module):
         self.width = width
         self.use_hfs_block123 = use_hfs_block123
         self.hfs_patch_size = list(hfs_patch_size)
-        self.meta_dim = meta_dim
+        #self.meta_dim = meta_dim
 
         # === 核心层定义 ===
         self.conv0 = SpectralConv2d(self.width, self.width, self.modes1, self.modes2)
@@ -429,9 +428,9 @@ class decoder(nn.Module):
         self.out_conv2 = nn.Conv2d(int(self.width * 2), 1, kernel_size=1, bias = False)
 
         #self.gn_b0 = nn.GroupNorm(num_groups=32, num_channels=self.width)
-        self.film_b1 = FiLM(num_channels=self.width, meta_dim=self.meta_dim, norm_type='group')
-        self.film_b2 = FiLM(num_channels=self.width, meta_dim=self.meta_dim, norm_type='group')
-        self.film_b3 = FiLM(num_channels=self.width, meta_dim=self.meta_dim, norm_type='group')
+        self.gn_b1 = nn.GroupNorm(num_groups=32, num_channels=self.width)
+        self.gn_b2 = nn.GroupNorm(num_groups=32, num_channels=self.width)
+        self.gn_b3 = nn.GroupNorm(num_groups=32, num_channels=self.width)
 
     def _resize_and_conv(self, x, target_size, conv_layer):
         #x = F.gelu(x, approximate="tanh")
@@ -474,7 +473,7 @@ class decoder(nn.Module):
             x3 = self.unet1(x)
 
         x = x1 + x2 + x3
-        x = self.film_b1(x, meta)
+        x = self.gn_b1(x)
         x = self._linear_sampling(x, self.linear1, self.linear_R_1)
         return x
 
@@ -491,7 +490,7 @@ class decoder(nn.Module):
             x3 = self.unet2(x)
 
         x = x1 + x2 + x3
-        x = self.film_b2(x, meta)
+        x = self.gn_b2(x)
         x = self.linear2(x)
         x = F.gelu(x, approximate='tanh')
 
@@ -509,7 +508,7 @@ class decoder(nn.Module):
             x3 = self.unet3(x)
 
         x = x1 + x2 + x3
-        x = self.film_b3(x, meta)
+        x = self.gn_b3(x)
         x = self.linear3(x)
         x = F.gelu(x, approximate='tanh')
 
