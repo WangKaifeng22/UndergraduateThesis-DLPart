@@ -58,6 +58,7 @@ class H5DeepONetDataset(dde.data.Data):
         self._shutdown = False
         self._prefetch_error = None
 
+
     def _prefetch_worker(self, batch_size):
         """后台线程预取数据"""
         while not self._shutdown:

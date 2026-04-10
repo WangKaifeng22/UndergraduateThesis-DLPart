@@ -92,40 +92,55 @@ def main(
     X_test, y_test = data.test()
 
     trunk_dim = data.trunk_dim
-    if trunk_dim != 2:
-        raise ValueError(f"Expected trunk_dim=2 for (x,z), got {trunk_dim}")
+
+    width = 96
+    Tx = 32
+    Rx = 32
+    T_steps = 1900
+    H = 80
+    W = 80
+    lifting_dim = 96
+    n_levels = 4
+    num_heads = 32
+    boundary_condition_types = ["ZEROS"]
+    dropout_rate = 0.0
+    regularization = ["l2", 3e-6]
+    channel_lift_first = True
 
     net = BranchTrunkFlower(
-        num_parameter=2,
-        width=64,
-        Tx=32,
-        Rx=32,
-        T_steps=1900,
-        H=80,
-        W=80,
-        lifting_dim=96,
-        n_levels=4,
-        num_heads=32,
-        boundary_condition_types=["ZEROS"],
-        dropout_rate=0.0,
+        num_parameter=trunk_dim,
+        width=width,
+        Tx=Tx,
+        Rx=Rx,
+        T_steps=T_steps,
+        H=H,
+        W=W,
+        lifting_dim=lifting_dim,
+        n_levels=n_levels,
+        num_heads=num_heads,
+        boundary_condition_types=boundary_condition_types,
+        dropout_rate=dropout_rate,
+        regularization=regularization,
+        channel_lift_first=channel_lift_first,
     )
     model = dde.Model(data, net)
 
     model_config = {
         "model_type": "BranchTrunkFlower",
         "model_init_kwargs": {
-            "num_parameter": 2,
-            "width": 64,
-            "Tx": 32,
-            "Rx": 32,
-            "T_steps": 1900,
-            "H": 80,
-            "W": 80,
-            "lifting_dim": 96,
-            "n_levels": 4,
-            "num_heads": 32,
-            "boundary_condition_types": ["ZEROS"],
-            "dropout_rate": 0.0,
+            "num_parameter": trunk_dim,
+            "width": width,
+            "Tx": Tx,
+            "Rx": Rx,
+            "T_steps": T_steps,
+            "H": H,
+            "W": W,
+            "lifting_dim": lifting_dim,
+            "n_levels": n_levels,
+            "num_heads": num_heads,
+            "boundary_condition_types": boundary_condition_types,
+            "dropout_rate": dropout_rate,
+            "channel_lift_first": channel_lift_first,
         },
         "data": {
             "h5_path": h5_path,
@@ -191,11 +206,13 @@ def main(
 
 
 if __name__ == "__main__":
-
-    save_path = "./model_branch_trunk_flower"
+    dataset = "50K"
+    task = "5x2_configs"
+    path = f'./model_{dataset}_{task}_test1_DFlower_CLF_96width_0.140625-0.453125'
+    os.makedirs(path, exist_ok=True)
     main(
         h5_path=cache_h5_path,
-        path=save_path,
+        path=path,
         split_ratio=0.9,
         seed=114514,
         batch_size=32,

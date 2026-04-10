@@ -5,9 +5,7 @@ import torch.nn.functional as F
 import sys
 from pathlib import Path
 
-
-_THIS_DIR = Path(__file__).resolve().parent
-_FLOWERS_ROOT = _THIS_DIR.parent.parent / "flowers"
+_FLOWERS_ROOT = "/home/wkf/wkf_kwave/flowers"
 if str(_FLOWERS_ROOT) not in sys.path:
     sys.path.append(str(_FLOWERS_ROOT))
 
@@ -25,7 +23,7 @@ class BranchTrunkFlower(dde.nn.pytorch.NN):
 
     def __init__(
             self,
-            num_parameter=2,
+            num_parameter=64,
             width=64,
             Tx=32,
             Rx=32,
@@ -37,6 +35,8 @@ class BranchTrunkFlower(dde.nn.pytorch.NN):
             num_heads=32,
             boundary_condition_types=["ZEROS"],
             dropout_rate=0.0,
+            regularization=None,
+            channel_lift_first=True,
     ):
         super().__init__()
         self.num_parameter = num_parameter
@@ -46,8 +46,9 @@ class BranchTrunkFlower(dde.nn.pytorch.NN):
         self.T_steps = T_steps
         self.H = H
         self.W = W
+        self.regularizer = regularization
 
-        self.branch = Branch(width=width, Tx=Tx, Rx=Rx, T_steps=T_steps, H=H, W=W)
+        self.branch = Branch(width=width, Tx=Tx, Rx=Rx, T_steps=T_steps, H=H, W=W, channel_lift_first=channel_lift_first)
         self.trunk = Trunk(width=width, num_parameter=num_parameter)
 
         self.flower = Flower(
@@ -79,7 +80,7 @@ class BranchTrunkFlower(dde.nn.pytorch.NN):
 class Branch(nn.Module):
     """Encodes [B, Tx, Rx, T] -> [B, C, H, W] via dual Linear projections."""
 
-    def __init__(self, width=64, Tx=32, Rx=32, T_steps=1900, H=80, W=80):
+    def __init__(self, width=64, Tx=32, Rx=32, T_steps=1900, H=80, W=80, channel_lift_first = False):
         super().__init__()
         self.width = width
         self.Tx = Tx
@@ -90,22 +91,44 @@ class Branch(nn.Module):
 
         self.linear_T = nn.Linear(T_steps, W)
         self.linear_Rx = nn.Linear(Rx, H)
-        self.channel_lift = nn.Conv2d(Tx, width, kernel_size=1, stride=1, padding=0, bias=True)
+        self.channel_lift_first = channel_lift_first
+        if self.channel_lift_first:
+            self.linear_C_0 = nn.Linear(Tx, int(width*2))
+            self.linear_C_1 = nn.Linear(int(width*2), width)
+        else:
+            self.channel_lift = nn.Conv2d(Tx, width, kernel_size=1, stride=1, padding=0, bias=True)
 
     def forward(self, x):
-        # x: [B, Tx, Rx, T]
-        # Project T -> W
-        x = self.linear_T(x)          # [B, Tx, Rx, W]
 
-        # Project Rx -> H
-        x = x.permute(0, 1, 3, 2)     # [B, Tx, W, Rx]
-        x = self.linear_Rx(x)         # [B, Tx, W, H]
-        x = x.permute(0, 1, 3, 2)     # [B, Tx, H, W]
+        if self.channel_lift_first:
+            # Lift Tx axis to channel width
+            x = x.permute(0, 3, 2, 1)     # [B, T, Rx, Tx]
+            x = self.linear_C_0(x)        # [B, T, Rx, width*2]
 
-        # Lift Tx axis to channel width
-        x = self.channel_lift(x)      # [B, width, H, W]
-        x = F.gelu(x, approximate="tanh")
+            # Project Rx -> H
+            x = x.permute(0, 1, 3, 2)     # [B, T, width*2, Rx]
+            x = self.linear_Rx(x)         # [B, T, width*2, H]
+            x = x.permute(0, 2, 3, 1)     # [B, T, H, width*2]
 
+            x = self.linear_T(x)          # [B, width*2, Rx, Tx]
+
+            x = F.gelu(x, approximate="tanh")
+            x = x.permute(0, 3, 2, 1)     # [B, Tx, Rx, width*2]
+            x = self.linear_C_1(x)        # [B, Tx, Rx, width]
+            x = x.permute(0, 3, 2, 1)     # [B, width, Rx, Tx]
+        else:
+            # x: [B, Tx, Rx, T]
+            # Project T -> W
+            x = self.linear_T(x)          # [B, Tx, Rx, W]
+
+            # Project Rx -> H
+            x = x.permute(0, 1, 3, 2)     # [B, Tx, W, Rx]
+            x = self.linear_Rx(x)         # [B, Tx, W, H]
+            x = x.permute(0, 1, 3, 2)     # [B, Tx, H, W]
+
+            # Lift Tx axis to channel width
+            x = self.channel_lift(x)      # [B, width, H, W]
+            x = F.gelu(x, approximate="tanh")
         return x
 
 

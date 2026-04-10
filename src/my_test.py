@@ -7,6 +7,7 @@ import h5py
 from matplotlib import colors
 from model_Unet_CNN import FourierDeepONet
 from InversionNet import InversionNet
+from model_BranchTrunkFlower import BranchTrunkFlower
 from model_NIO import NIOUltrasoundCTAbl
 from train_NIO import build_nio
 from multi_data import get_dataset as get_multi_dataset
@@ -93,7 +94,7 @@ def _load_json_file(path):
 
 
 def _infer_sample_count(X_test, model_type):
-    if model_type in {"FourierDeepONet", "NIO"}:
+    if model_type in {"FourierDeepONet", "BranchTrunkFlower", "NIO"}:
         return len(X_test[0])
     return len(X_test)
 
@@ -395,6 +396,7 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
     model_type_alias = {
         "FourierDeepONet": "FourierDeepONet",
+        "BranchTrunkFlower": "BranchTrunkFlower",
         "InversionNet": "InversionNet",
         "NIO": "NIO",
         "NIOUltrasoundCTAbl": "NIO",
@@ -402,7 +404,7 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
     model_type = model_type_alias.get(model_type_raw, model_type_raw)
 
     print(f"--- 2. Loading Data ---")
-    if model_type == "FourierDeepONet" and data_cfg is not None:
+    if model_type in {"FourierDeepONet", "BranchTrunkFlower"} and data_cfg is not None:
         if total_data_num <= 0 and isinstance(h5_meta, dict):
             total_data_num = int(h5_meta.get("num_samples", total_data_num))
         if total_data_num <= 0 and data_cfg.get("cache_h5_path"):
@@ -469,19 +471,37 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
     print(f"--- 3. Building Model ---")
 
-    if model_type == "FourierDeepONet":
+    if model_type in {"FourierDeepONet", "BranchTrunkFlower"}:
         if isinstance(model_init_kwargs, dict):
-            net = FourierDeepONet(**model_init_kwargs)
+            net = BranchTrunkFlower(**model_init_kwargs) if model_type == "BranchTrunkFlower" else FourierDeepONet(**model_init_kwargs)
         else:
             trunk_dim = X_test[1].shape[1]
-            net = FourierDeepONet(
-                num_parameter=trunk_dim,
-                width=64,
-                modes1=16,
-                modes2=16,
-                regularization=["l2", 3e-6],
-                merge_operation="mul",
-            )
+            if model_type == "BranchTrunkFlower":
+                net = BranchTrunkFlower(
+                    num_parameter=trunk_dim,
+                    width=96,
+                    Tx=32,
+                    Rx=32,
+                    T_steps=1900,
+                    H=sosmap_size[0],
+                    W=sosmap_size[1],
+                    lifting_dim=96,
+                    n_levels=4,
+                    num_heads=32,
+                    boundary_condition_types=["ZEROS"],
+                    dropout_rate=0.0,
+                    regularization=["l2", 3e-6],
+                    channel_lift_first=True,
+                )
+            else:
+                net = FourierDeepONet(
+                    num_parameter=trunk_dim,
+                    width=64,
+                    modes1=16,
+                    modes2=16,
+                    regularization=["l2", 3e-6],
+                    merge_operation="mul",
+                )
     elif model_type == "InversionNet":
         if isinstance(model_init_kwargs, dict):
             net = InversionNet(**model_init_kwargs)
@@ -501,7 +521,7 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
             **nio_kwargs,
         )
     else:
-        raise ValueError(f"Unknown model_type={model_type!r}. Expected 'FourierDeepONet', 'InversionNet', or 'NIO'.")
+        raise ValueError(f"Unknown model_type={model_type!r}. Expected 'FourierDeepONet', 'BranchTrunkFlower', 'InversionNet', or 'NIO'.")
 
     net.to(device)
 
@@ -529,7 +549,7 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
             start = batch_size * i
             end = min(batch_size * (i + 1), sample_count)
 
-            if model_type == "FourierDeepONet":
+            if model_type in {"FourierDeepONet", "BranchTrunkFlower"}:
                 branch_batch = torch.as_tensor(X_test[0][start:end]).to(device)
                 trunk_batch = torch.as_tensor(X_test[1][start:end]).to(device)
                 inputs = (branch_batch, trunk_batch)
@@ -644,12 +664,12 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
 
 if __name__ == "__main__":
-    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/model-230000.pt"
-    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/test_result_realworld_linear_230000"
+    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_DFlower_0.140625-0.453125/model-285000.pt"
+    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_DFlower_0.140625-0.453125/test_result"
     main(model_path=MODEL_PATH, result_dir = result_dir,
-     model_type="FourierDeepONet", visualize=True, batch_size=32,
-         split_ratio=0, total_data_num = 597, is_deeponet=True
-         ,sosmap_size=(80, 80), samples_plot=597, mm_per_pixel=0.1,
-         cache_h5_path="/home/wkf/kwave-python/real-worldData/real_world_data_linear.h5",
-         cache_meta_path="/home/wkf/kwave-python/real-worldData/real_world_data_linear_meta.json",
-         has_ground_truth=False)
+     model_type="BranchTrunkFlower", visualize=True, batch_size=32,
+         split_ratio=0.9, total_data_num = 50000, is_deeponet=True
+         ,sosmap_size=(80, 80), samples_plot=100, mm_per_pixel=0.1,
+         cache_h5_path="/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125.h5",
+         cache_meta_path="/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125_meta.json",
+         has_ground_truth=True)
