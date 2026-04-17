@@ -86,6 +86,33 @@ Supported model types:
 
 You can either modify the `__main__` block in `src/my_test.py` or call `main(...)` from your own script.
 
+## Inference Benchmark
+
+Use `src/benchmark_inference.py` for latency/throughput benchmarking without mixing in plotting and metric post-processing overhead.
+
+Example:
+
+```bash
+cd src
+python benchmark_inference.py \
+	--model-path /path/to/model.pt \
+	--model-type InversionNet \
+	--batch-size 32 \
+	--warmup-iters 20 \
+	--measure-iters 100 \
+	--timing-scope forward
+```
+
+Timing scopes:
+
+- `forward`: measures only model forward pass on prepared device tensors.
+- `end2end`: measures per-batch tensor creation and host->device transfer plus forward pass.
+
+Outputs:
+
+- Console summary
+- `benchmark_result/benchmark_report.txt` next to the checkpoint (or `--out-dir` if specified)
+
 ## Modules not yet adapted:
 
 The following modules have not been validated for operation and may not work correctly.

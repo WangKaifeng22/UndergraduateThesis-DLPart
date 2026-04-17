@@ -10,7 +10,7 @@ import torch
 from deepxde.callbacks import Callback
 
 from H5NIODataset import H5NIOConfig, H5NIODataset
-from model_NIO import NIOUltrasoundCTAbl
+from model_NIO import EncoderUSCT, EncoderUSCTHelm2, NIOUltrasoundCTAbl
 
 
 class PlottingCallback(Callback):
@@ -143,7 +143,12 @@ def build_nio(
     fno_modes=16,
     fno_width=64,
     fno_n_layers=4,
+    branch_encoder_cls=EncoderUSCTHelm2,
+    branch_encoder_kwargs=None,
 ):
+    if branch_encoder_kwargs is None:
+        branch_encoder_kwargs = {}
+
     network_properties_branch = {}
     network_properties_trunk = {
         "n_hidden_layers": trunk_hidden_layers,
@@ -169,6 +174,8 @@ def build_nio(
         padding_frac=1 / 4,
         usct_time_steps=usct_time_steps,
         usct_hidden=usct_hidden,
+        branch_encoder_cls=branch_encoder_cls,
+        branch_encoder_kwargs=branch_encoder_kwargs,
         regularization = ["l2", 3e-6],
     )
 
@@ -185,7 +192,9 @@ def main(
     total_epoch=250,
     enable_timing=True,
     split_ratio = 0.8,
-    seed = 114514
+    seed = 114514,
+    branch_encoder_cls=EncoderUSCTHelm2,
+    branch_encoder_kwargs=None,
 ):
     set_seed(seed)
     total_data_num = int(samples_per_config * len(x_params))
@@ -199,8 +208,11 @@ def main(
             test_batch_size=test_batch_size,
             total_data_num=total_data_num,
             squeeze_y_channel=True,
+            
         ),
         seed=seed,
+        enable_timing=enable_timing,
+        
     )
     X_test, y_test = data.test()
 
@@ -211,7 +223,7 @@ def main(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     usct_time_steps = int(X_test[0].shape[-1])
     nio_arch = {
-        "usct_hidden": 256,
+        "usct_hidden": 128,
         "trunk_hidden_layers": 4,
         "trunk_neurons": 128,
         "trunk_n_basis": 256,
@@ -220,8 +232,18 @@ def main(
         "fno_n_layers": 4,
     }
 
-    net = build_nio(seed=seed, usct_time_steps=usct_time_steps, device=device, **nio_arch)
+    net = build_nio(
+        seed=seed,
+        usct_time_steps=usct_time_steps,
+        device=device,
+        branch_encoder_cls=branch_encoder_cls,
+        branch_encoder_kwargs=branch_encoder_kwargs,
+        **nio_arch,
+    )
     model = dde.Model(data, net)
+
+    if branch_encoder_kwargs is None:
+        branch_encoder_kwargs = {}
 
     model_config = {
         "model_type": "NIOUltrasoundCTAbl",
@@ -230,6 +252,8 @@ def main(
             "usct_time_steps": usct_time_steps,
             **nio_arch,
             "grid_npy_path": grid_npy_path,
+            "branch_encoder_cls": getattr(branch_encoder_cls, "__name__", str(branch_encoder_cls)),
+            "branch_encoder_kwargs": branch_encoder_kwargs,
         },
         "data": {
             "cache_h5_path": cache_h5_path,
@@ -285,7 +309,7 @@ def main(
     timing_logger = None
     if enable_timing:
         timing_logger = TimingCallback(period=1, save_dir=f"{path}/logs", start_iteration=start_iteration, sync_cuda=True)
-
+        remaining_iterations = 25
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -313,7 +337,7 @@ if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
     grid_npy_path = "/home/wkf/kwave-python/temp/grid_xy.npy"
-    path = f"./model_{dataset}_{task}_NIO"
+    path = f"./model_{dataset}_{task}_NIO_test1"
     os.makedirs(path, exist_ok=True)
 
     main(
@@ -326,9 +350,10 @@ if __name__ == "__main__":
         path=path,
         start_iteration=0,
         total_epoch=200,
-        enable_timing=False,
+        enable_timing=True,
         split_ratio = 0.9,
-        seed = 114514
+        seed = 114514,
+        branch_encoder_cls=EncoderUSCTHelm2,
     )
 
 

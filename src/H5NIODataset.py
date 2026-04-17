@@ -7,6 +7,7 @@ import numpy as np
 import deepxde as dde
 import threading
 import queue
+import time
 
 
 @dataclass
@@ -26,12 +27,16 @@ class H5NIODataset(dde.data.Data):
     Trunk input is a fixed grid loaded once from a .npy file: [Nx, Ny, 2].
     """
 
-    def __init__(self, cfg: H5NIOConfig, seed: int = 114514):
+    def __init__(self, cfg: H5NIOConfig, seed: int = 114514, enable_timing: bool = False):
         super().__init__()
         self.cfg = cfg
         self.h5_path = cfg.h5_path
         self.n = int(cfg.total_data_num)
         self.squeeze_y_channel = bool(cfg.squeeze_y_channel)
+        self._verbose = bool(enable_timing)
+        self._read_count = 0
+        self._wait_count = 0
+        self._print_interval = 1
 
         # Load static reconstruction grid once and keep it in memory.
         grid = np.load(cfg.grid_npy_path)
@@ -143,6 +148,7 @@ class H5NIODataset(dde.data.Data):
         return loss_fn(targets, outputs)
 
     def _get_batch_by_global_indices(self, global_idx: np.ndarray):
+        t_start = time.perf_counter() if self._verbose else None
         self._ensure_file_open()
 
         read_idx, inverse = self._prepare_h5_indices(global_idx)
@@ -156,6 +162,15 @@ class H5NIODataset(dde.data.Data):
 
         if self.squeeze_y_channel and y.ndim == 4 and y.shape[-1] == 1:
             y = np.squeeze(y, axis=-1)
+
+        if self._verbose:
+            h5_read_time = time.perf_counter() - t_start
+            if self._read_count % self._print_interval == 0:
+                print(
+                    f"[DataLoader] H5 Read Time (disk I/O): {h5_read_time*1000:.2f} ms | "
+                    f"Batch size: {len(global_idx)} | X_branch shape: {Xb.shape} | y shape: {y.shape}"
+                )
+            self._read_count += 1
 
         return (Xb, self.grid), y
 
@@ -174,6 +189,8 @@ class H5NIODataset(dde.data.Data):
         if batch_size is None:
             batch_size = 32
 
+        t_start = time.perf_counter() if self._verbose else None
+
         if self.prefetch_thread is None or not self.prefetch_thread.is_alive():
             self.prefetch_thread = threading.Thread(
                 target=self._prefetch_worker, args=(batch_size,), daemon=True
@@ -191,6 +208,15 @@ class H5NIODataset(dde.data.Data):
             err = self._prefetch_error
             self._prefetch_error = None
             raise RuntimeError("Prefetch worker failed while loading HDF5 batch") from err
+
+        if self._verbose:
+            total_wait_time = time.perf_counter() - t_start
+            self._wait_count += 1
+            if self._wait_count % self._print_interval == 0:
+                print(
+                    f"[DataLoader] Total Wait Time (queue+I/O): {total_wait_time*1000:.2f} ms | "
+                    f"Batch: {self._wait_count}"
+                )
 
         return result
 

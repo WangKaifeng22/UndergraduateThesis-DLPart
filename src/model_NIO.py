@@ -5,6 +5,36 @@ from DeepONetModules import FeedForwardNN, DeepOnetNoBiasOrg
 from FNOModules import FNO_WOR
 
 
+def get_group_norm(channels: int):
+    groups = 32
+    if channels < 32:
+        groups = 8
+    if channels % groups != 0:
+        groups = 1
+    return nn.GroupNorm(num_groups=groups, num_channels=channels)
+
+
+class ConvBlock(nn.Module):
+    def __init__(self, in_fea, out_fea, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), norm='gn', relu_slop=0.2):
+        super().__init__()
+        layers = [
+            nn.Conv2d(
+                in_channels=in_fea,
+                out_channels=out_fea,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+            )
+        ]
+        if norm == 'gn':
+            layers.append(get_group_norm(out_fea))
+        layers.append(nn.LeakyReLU(relu_slop, inplace=True))
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
+
+
 class EncoderUSCT(nn.Module):
     """
     Minimal encoder for USCT measurements:
@@ -46,6 +76,83 @@ class EncoderUSCT(nn.Module):
         return nparams
 
 
+class EncoderUSCTHelm2(nn.Module):
+    """
+    Helm2-style encoder for USCT measurements.
+
+    Input:  x [B, 32, 32, 1900]
+    Output: z [B, 32, n_basis]
+
+    This keeps the original encoder intact and exposes a more convolutional
+    alternative that is closer to the reference implementation.
+    """
+
+    def __init__(
+        self,
+        n_basis: int,
+        time_steps: int = 1900,
+        hidden: int = 256,
+        print_bool: bool = False,
+    ):
+        super().__init__()
+        self.n_basis = n_basis
+        self.time_steps = time_steps
+        self.print_bool = print_bool
+        self.token_count = 32
+
+        dim1 = max(64, hidden // 4)
+        dim2 = max(128, hidden // 2)
+        dim3 = max(256, hidden)
+        dim4 = max(512, hidden * 2)
+        dim5 = dim4
+
+        self.convblock1 = ConvBlock(self.token_count, dim1, kernel_size=(1, 7), stride=(1, 2), padding=(0, 3))
+        self.convblock2_1 = ConvBlock(dim1, dim2, kernel_size=(1, 3), stride=(1, 2), padding=(0, 1))
+        self.convblock2_2 = ConvBlock(dim2, dim2, kernel_size=(1, 3), padding=(0, 1))
+        self.convblock3_1 = ConvBlock(dim2, dim3, kernel_size=(1, 3), stride=(1, 2), padding=(0, 1))
+        self.convblock3_2 = ConvBlock(dim3, dim3, kernel_size=(1, 3), padding=(0, 1))
+        self.convblock4_1 = ConvBlock(dim3, dim4, kernel_size=(1, 3), stride=(1, 2), padding=(0, 1))
+        self.convblock4_2 = ConvBlock(dim4, dim4, kernel_size=(1, 3), padding=(0, 1))
+        self.convblock7_1 = ConvBlock(dim4, dim5, kernel_size=(4, 5), padding=0)
+
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.linear = nn.Linear(dim5, self.token_count * n_basis)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, 32, 32, 1900]
+        return: [B, 32, n_basis]
+        """
+        batch_size, size_fun, height, width = x.shape
+        assert size_fun == self.token_count and height == 32 and width == self.time_steps, f"Expected [B,32,32,T], got {x.shape}"
+
+        # Keep tx on channel axis: [B, tx=32, rx=32, T]
+        x = x.contiguous()
+
+        if self.print_bool:
+            print(x.shape)
+
+        x = self.convblock1(x)
+        x = self.convblock2_1(x)
+        x = self.convblock2_2(x)
+        x = self.convblock3_1(x)
+        x = self.convblock3_2(x)
+        x = self.convblock4_1(x)
+        x = self.convblock4_2(x)
+        x = self.convblock7_1(x)
+        x = self.pool(x)
+        x = torch.flatten(x, 1)
+        x = self.linear(x)
+        x = x.view(batch_size, self.token_count, self.n_basis)
+
+        return x
+
+    def print_size(self):
+        nparams = sum(p.numel() for p in self.parameters())
+        print(nparams)
+        return nparams
+
+
 class NIOUltrasoundCTAbl(nn.Module):
     """
     NIO for Ultrasound CT (no random subsampling).
@@ -63,6 +170,8 @@ class NIOUltrasoundCTAbl(nn.Module):
                  padding_frac=1/4,
                  usct_time_steps=1900,
                  usct_hidden=256,
+                 branch_encoder_cls=EncoderUSCTHelm2,
+                 branch_encoder_kwargs=None,
                  regularization=None):
         super(NIOUltrasoundCTAbl, self).__init__()
 
@@ -74,11 +183,15 @@ class NIOUltrasoundCTAbl(nn.Module):
         # Trunk: should take 2D coordinates (x,y), so input_dimensions_trunk should be 2
         self.trunk = FeedForwardNN(input_dimensions_trunk, output_dimensions, network_properties_trunk)
 
-        # Branch: USCT encoder, output [B, 1024, n_basis]
-        self.branch = EncoderUSCT(
+        if branch_encoder_kwargs is None:
+            branch_encoder_kwargs = {}
+
+        # Branch: USCT encoder (default old encoder, or new Helm2-style encoder)
+        self.branch = branch_encoder_cls(
             n_basis=output_dimensions,
             time_steps=usct_time_steps,
-            hidden=usct_hidden
+            hidden=usct_hidden,
+            **branch_encoder_kwargs,
         )
 
         self.deeponet = DeepOnetNoBiasOrg(self.branch, self.trunk)
@@ -129,8 +242,8 @@ class NIOUltrasoundCTAbl(nn.Module):
         h = torch.cat((grid_b, u), dim=1)  # [B,2+L,nx,ny]
 
         # 4) Project (2+L) -> width using fc0 expansion trick
-        W = self.fc0.weight.data  # [width, 3]
-        b = self.fc0.bias.data    # [width]
+        W = self.fc0.weight  # [width, 3]
+        b = self.fc0.bias    # [width]
         W_expand = torch.cat(
             [W[:, :2], W[:, 2].view(-1, 1).repeat(1, L) / L],
             dim=1

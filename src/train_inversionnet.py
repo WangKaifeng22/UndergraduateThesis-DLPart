@@ -378,7 +378,7 @@ def main(
     timing_logger = None
     if enable_timing:
         timing_logger = TimingCallback(period=1, save_dir=f"{path}/logs", start_iteration=start_iteration, sync_cuda=True)
-
+        remaining_iterations = 25  
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -421,7 +421,7 @@ if __name__ == "__main__":
         path=path,
         start_iteration=0,
         total_epoch=200,
-        enable_timing=False,
+        enable_timing=True,
         split_ratio=0.9,
         seed=114514,
         optimizer_name="adamw",

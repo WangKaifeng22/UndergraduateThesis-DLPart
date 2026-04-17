@@ -397,9 +397,10 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test0_FiLM_0.140625-0.453125'
+    path = f'./model_{dataset}_{task}_test0_0.140625-0.453125'
+    model_path = None
     os.makedirs(path, exist_ok=True)
     main(dataset=dataset, task=task, batch_size=32, lazy=True, test=False,
-         model_path=None, path=path, 
-         start_iteration=0, total_epoch=200, enable_timing=False, split_ratio=0.9, seed=114514)
+         model_path=model_path, path=path, 
+         start_iteration=0, total_epoch=200, enable_timing=True, split_ratio=0.9, seed=114514)
 

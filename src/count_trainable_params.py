@@ -9,8 +9,14 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 
 from InversionNet import InversionNet
-from model_NIO import NIOUltrasoundCTAbl
 from model_Unet_CNN import FourierDeepONet
+from nio_build_utils import (
+    extract_nio_build_kwargs,
+    resolve_nio_branch_encoder_cls,
+    resolve_nio_branch_encoder_kwargs,
+)
+from train_NIO import build_nio
+
 
 MODEL_TYPE_MAP = {
     "fourierdeeponet": "fourier_deeponet",
@@ -95,47 +101,6 @@ def build_fourier_deeponet(
         merge_operation=merge_operation,
         use_hfs_block123=use_hfs_block123,
         hfs_patch_size=hfs_patch_size,
-    )
-
-
-def build_nio(
-    seed: int,
-    usct_time_steps: int,
-    device: torch.device,
-    usct_hidden: int = 256,
-    trunk_hidden_layers: int = 4,
-    trunk_neurons: int = 128,
-    trunk_n_basis: int = 256,
-    fno_modes: int = 16,
-    fno_width: int = 64,
-    fno_n_layers: int = 4,
-    trunk_activation: str = "relu",
-) -> torch.nn.Module:
-    network_properties_branch: Dict[str, Any] = {}
-    network_properties_trunk = {
-        "n_hidden_layers": trunk_hidden_layers,
-        "neurons": trunk_neurons,
-        "act_string": trunk_activation,
-        "retrain": seed,
-        "dropout_rate": 0.0,
-        "n_basis": trunk_n_basis,
-    }
-    fno_architecture = {
-        "modes": fno_modes,
-        "width": fno_width,
-        "n_layers": fno_n_layers,
-    }
-
-    return NIOUltrasoundCTAbl(
-        input_dimensions_trunk=2,
-        network_properties_branch=network_properties_branch,
-        network_properties_trunk=network_properties_trunk,
-        fno_architecture=fno_architecture,
-        device=device,
-        retrain_seed=seed,
-        padding_frac=1 / 4,
-        usct_time_steps=usct_time_steps,
-        usct_hidden=usct_hidden,
     )
 
 
@@ -229,7 +194,12 @@ def main() -> None:
     parser.add_argument("--nio-fno-modes", type=int, default=20, help="Fourier modes used in NIO FNO.")
     parser.add_argument("--nio-fno-width", type=int, default=64, help="Channel width used in NIO FNO.")
     parser.add_argument("--nio-fno-n-layers", type=int, default=4, help="Number of layers in NIO FNO.")
-    parser.add_argument("--nio-trunk-activation", type=str, default="relu", help="Activation used in NIO trunk MLP.")
+    parser.add_argument(
+        "--nio-trunk-activation",
+        type=str,
+        default="relu",
+        help="Deprecated and ignored when using train_NIO.build_nio (kept for CLI compatibility).",
+    )
     parser.add_argument("--seed", type=int, default=114514, help="Seed used in NIO config.")
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda"], help="Device for NIO build.")
     parser.add_argument(
@@ -279,18 +249,30 @@ def main() -> None:
                     merge_operation=str(cfg_kwargs.get("merge_operation", "mul")),
                 )
             elif model_key == "nio":
+                requested_trunk_activation = str(cfg_kwargs.get("trunk_activation", args.nio_trunk_activation))
+                if "trunk_activation" in cfg_kwargs or args.nio_trunk_activation != "relu":
+                    print(
+                        f"[warn] trunk_activation='{requested_trunk_activation}' is ignored "
+                        "because count_trainable_params now reuses train_NIO.build_nio."
+                    )
+
+                nio_kwargs = extract_nio_build_kwargs(cfg_kwargs)
+                branch_encoder_cls = resolve_nio_branch_encoder_cls(cfg_kwargs)
+                branch_encoder_kwargs = resolve_nio_branch_encoder_kwargs(cfg_kwargs)
+
                 model = build_nio(
                     seed=args.seed,
                     usct_time_steps=int(cfg_kwargs.get("usct_time_steps", args.nio_usct_time_steps)),
                     device=device,
-                    usct_hidden=int(cfg_kwargs.get("usct_hidden", args.nio_usct_hidden)),
-                    trunk_hidden_layers=int(cfg_kwargs.get("trunk_hidden_layers", args.nio_trunk_hidden_layers)),
-                    trunk_neurons=int(cfg_kwargs.get("trunk_neurons", args.nio_trunk_neurons)),
-                    trunk_n_basis=int(cfg_kwargs.get("trunk_n_basis", args.nio_trunk_n_basis)),
-                    fno_modes=int(cfg_kwargs.get("fno_modes", args.nio_fno_modes)),
-                    fno_width=int(cfg_kwargs.get("fno_width", args.nio_fno_width)),
-                    fno_n_layers=int(cfg_kwargs.get("fno_n_layers", args.nio_fno_n_layers)),
-                    trunk_activation=str(cfg_kwargs.get("trunk_activation", args.nio_trunk_activation)),
+                    usct_hidden=int(nio_kwargs.get("usct_hidden", args.nio_usct_hidden)),
+                    trunk_hidden_layers=int(nio_kwargs.get("trunk_hidden_layers", args.nio_trunk_hidden_layers)),
+                    trunk_neurons=int(nio_kwargs.get("trunk_neurons", args.nio_trunk_neurons)),
+                    trunk_n_basis=int(nio_kwargs.get("trunk_n_basis", args.nio_trunk_n_basis)),
+                    fno_modes=int(nio_kwargs.get("fno_modes", args.nio_fno_modes)),
+                    fno_width=int(nio_kwargs.get("fno_width", args.nio_fno_width)),
+                    fno_n_layers=int(nio_kwargs.get("fno_n_layers", args.nio_fno_n_layers)),
+                    branch_encoder_cls=branch_encoder_cls,
+                    branch_encoder_kwargs=branch_encoder_kwargs,
                 )
             elif model_key == "inversionnet":
                 model = build_inversionnet(

@@ -217,6 +217,6 @@ if __name__ == "__main__":
         seed=114514,
         batch_size=32,
         total_epoch=200,
-        start_iteration=0,
-        model_path=None,
+        start_iteration=204000+55000,
+        model_path="/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test1_DFlower_CLF_96width_0.140625-0.453125/model-55000.pt",
     )

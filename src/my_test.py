@@ -8,7 +8,11 @@ from matplotlib import colors
 from model_Unet_CNN import FourierDeepONet
 from InversionNet import InversionNet
 from model_BranchTrunkFlower import BranchTrunkFlower
-from model_NIO import NIOUltrasoundCTAbl
+from nio_build_utils import (
+    extract_nio_build_kwargs as _extract_nio_build_kwargs,
+    resolve_nio_branch_encoder_cls as _resolve_nio_branch_encoder_cls,
+    resolve_nio_branch_encoder_kwargs as _resolve_nio_branch_encoder_kwargs,
+)
 from train_NIO import build_nio
 from multi_data import get_dataset as get_multi_dataset
 from my_data import get_dataset as get_legacy_dataset
@@ -97,27 +101,6 @@ def _infer_sample_count(X_test, model_type):
     if model_type in {"FourierDeepONet", "BranchTrunkFlower", "NIO"}:
         return len(X_test[0])
     return len(X_test)
-
-
-def _extract_nio_build_kwargs(model_init_kwargs):
-    """Build kwargs for build_nio from model_config.json, with safe defaults."""
-    defaults = {
-        "usct_hidden": 256,
-        "trunk_hidden_layers": 4,
-        "trunk_neurons": 128,
-        "trunk_n_basis": 256,
-        "fno_modes": 16,
-        "fno_width": 64,
-        "fno_n_layers": 4,
-    }
-    if not isinstance(model_init_kwargs, dict):
-        return defaults
-
-    out = defaults.copy()
-    for key in out.keys():
-        if key in model_init_kwargs and model_init_kwargs[key] is not None:
-            out[key] = int(model_init_kwargs[key])
-    return out
 
 
 def plot_velocity_comparison(
@@ -511,6 +494,8 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
         seed = 114514
         usct_time_steps = int(X_test[0].shape[-1])
         nio_kwargs = _extract_nio_build_kwargs(model_init_kwargs)
+        branch_encoder_cls = _resolve_nio_branch_encoder_cls(model_init_kwargs)
+        branch_encoder_kwargs = _resolve_nio_branch_encoder_kwargs(model_init_kwargs)
         if isinstance(model_init_kwargs, dict):
             usct_time_steps = int(model_init_kwargs.get("usct_time_steps", usct_time_steps))
 
@@ -518,6 +503,8 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
             seed=seed,
             usct_time_steps=usct_time_steps,
             device=device,
+            branch_encoder_cls=branch_encoder_cls,
+            branch_encoder_kwargs=branch_encoder_kwargs,
             **nio_kwargs,
         )
     else:
@@ -664,10 +651,10 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
 
 if __name__ == "__main__":
-    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_DFlower_0.140625-0.453125/model-285000.pt"
-    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_DFlower_0.140625-0.453125/test_result"
+    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO_test1/model-254000.pt"
+    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO_test1/test_result"
     main(model_path=MODEL_PATH, result_dir = result_dir,
-     model_type="BranchTrunkFlower", visualize=True, batch_size=32,
+     model_type="NIO", visualize=True, batch_size=32,
          split_ratio=0.9, total_data_num = 50000, is_deeponet=True
          ,sosmap_size=(80, 80), samples_plot=100, mm_per_pixel=0.1,
          cache_h5_path="/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125.h5",

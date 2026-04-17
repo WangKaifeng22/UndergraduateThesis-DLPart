@@ -80,8 +80,8 @@ def plot_loss_history(
 
 if __name__ == "__main__":
     # 例子：把这里改成你训练输出的 CSV 路径
-    csv_file = r"/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_DFlower_0.140625-0.453125/logs/loss_history.csv"
-    out_file = r"/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_DFlower_0.140625-0.453125/logs/loss.png"
+    csv_file = r"/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO_test1/logs/loss_history.csv"
+    out_file = r"/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO_test1/logs/loss.png"
 
     saved = plot_loss_history(
         csv_path=csv_file,
