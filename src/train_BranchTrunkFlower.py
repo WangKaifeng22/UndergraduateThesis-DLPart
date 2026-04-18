@@ -72,6 +72,7 @@ def main(
     total_epoch=200,
     start_iteration=0,
     model_path=None,
+    enable_timing=False,
 ):
     set_seed(seed)
     os.makedirs(path, exist_ok=True)
@@ -87,19 +88,19 @@ def main(
         ),
         is_deeponet=True,
         seed=seed,
-        enable_timing=False,
+        enable_timing=enable_timing,
     )
     X_test, y_test = data.test()
 
     trunk_dim = data.trunk_dim
 
-    width = 96
+    width = 128
     Tx = 32
     Rx = 32
     T_steps = 1900
     H = 80
     W = 80
-    lifting_dim = 96
+    lifting_dim = 128
     n_levels = 4
     num_heads = 32
     boundary_condition_types = ["ZEROS"]
@@ -208,8 +209,9 @@ def main(
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test1_DFlower_CLF_96width_0.140625-0.453125'
+    path = f'./model_{dataset}_{task}_test1_DFlower_CLF_128width_0.140625-0.453125'
     os.makedirs(path, exist_ok=True)
+    model_path = None
     main(
         h5_path=cache_h5_path,
         path=path,
@@ -217,6 +219,7 @@ if __name__ == "__main__":
         seed=114514,
         batch_size=32,
         total_epoch=200,
-        start_iteration=204000+55000,
-        model_path="/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test1_DFlower_CLF_96width_0.140625-0.453125/model-55000.pt",
+        start_iteration=0,
+        model_path=model_path,
+        enable_timing=False,
     )

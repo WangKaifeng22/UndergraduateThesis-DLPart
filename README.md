@@ -86,6 +86,12 @@ Supported model types:
 
 You can either modify the `__main__` block in `src/my_test.py` or call `main(...)` from your own script.
 
+For Gaussian-noise robustness experiments, use `src/robustness_test.py`.
+
+- `FourierDeepONet` / `BranchTrunkFlower`: supports branch noise, trunk noise, and branch+trunk noise.
+- `InversionNet` / `NIO`: supports branch noise only.
+- The script saves per-trial metrics, aggregated summaries, and metric-vs-sigma plots under the chosen result directory.
+
 ## Inference Benchmark
 
 Use `src/benchmark_inference.py` for latency/throughput benchmarking without mixing in plotting and metric post-processing overhead.
