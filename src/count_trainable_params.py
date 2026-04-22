@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,8 @@ MODEL_TYPE_MAP = {
     "nioultrasoundctabl": "nio",
     "nio": "nio",
     "inversionnet": "inversionnet",
+    "branchtrunkflower": "branch_trunk_flower",
+    "branch_trunk_flower": "branch_trunk_flower",
 }
 
 
@@ -126,6 +129,89 @@ def build_inversionnet(
     )
 
 
+def _to_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(value)
+
+
+def _to_str_list(value: Any, default: List[str]) -> List[str]:
+    if value is None:
+        return list(default)
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return list(default)
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    return [str(v) for v in parsed]
+            except json.JSONDecodeError:
+                pass
+        return [part.strip() for part in stripped.split(",") if part.strip()]
+    return list(default)
+
+
+def build_branch_trunk_flower(
+    num_parameter: int = 2,
+    width: int = 160,
+    Tx: int = 32,
+    Rx: int = 32,
+    T_steps: int = 1900,
+    H: int = 80,
+    W: int = 80,
+    lifting_dim: int = 160,
+    n_levels: int = 4,
+    num_heads: int = 40,
+    boundary_condition_types: Optional[List[str]] = None,
+    dropout_rate: float = 0.0,
+    regularization: Optional[List[Any]] = None,
+    channel_lift_first: bool = True,
+) -> torch.nn.Module:
+    if boundary_condition_types is None:
+        boundary_condition_types = ["ZEROS"]
+    if regularization is None:
+        regularization = ["l2", 3e-6]
+
+    # DeepXDE chooses backend at import time.
+    os.environ.setdefault("DDE_BACKEND", "pytorch")
+    try:
+        from model_BranchTrunkFlower import BranchTrunkFlower
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed to import BranchTrunkFlower. Ensure deepxde is installed with pytorch backend "
+            "and /home/wkf/wkf_kwave/flowers is available."
+        ) from exc
+
+    return BranchTrunkFlower(
+        num_parameter=num_parameter,
+        width=width,
+        Tx=Tx,
+        Rx=Rx,
+        T_steps=T_steps,
+        H=H,
+        W=W,
+        lifting_dim=lifting_dim,
+        n_levels=n_levels,
+        num_heads=num_heads,
+        boundary_condition_types=boundary_condition_types,
+        dropout_rate=dropout_rate,
+        regularization=regularization,
+        channel_lift_first=channel_lift_first,
+    )
+
+
 def normalize_model_key(model_type: str) -> str:
     key = model_type.strip().lower()
     if key not in MODEL_TYPE_MAP:
@@ -176,12 +262,12 @@ def save_csv(path: Path, rows: List[Dict], fieldnames: List[str]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Count trainable parameters for Fourier DeepONet, NIO, InversionNet.")
+    parser = argparse.ArgumentParser(description="Count trainable parameters for Fourier DeepONet, NIO, InversionNet, and BranchTrunkFlower.")
     parser.add_argument(
         "--models",
         nargs="+",
         default=["fourier_deeponet", "nio", "inversionnet"],
-        choices=["fourier_deeponet", "nio", "inversionnet"],
+        choices=["fourier_deeponet", "nio", "inversionnet", "branch_trunk_flower"],
         help="Models to count.",
     )
     parser.add_argument("--output-dir", type=str, default="reports/param_counts", help="Output directory.")
@@ -207,6 +293,29 @@ def main() -> None:
         nargs="+",
         default=None,
         help="One or more model_config.json paths. If set, model constructor params are read from each config and manual CLI model params are ignored.",
+    )
+    parser.add_argument("--btf-num-parameter", type=int, default=2, help="Trunk input dim for BranchTrunkFlower.")
+    parser.add_argument("--btf-width", type=int, default=160, help="Channel width for BranchTrunkFlower.")
+    parser.add_argument("--btf-tx", type=int, default=32, help="Tx count for BranchTrunkFlower branch input.")
+    parser.add_argument("--btf-rx", type=int, default=32, help="Rx count for BranchTrunkFlower branch input.")
+    parser.add_argument("--btf-t-steps", type=int, default=1900, help="Time steps for BranchTrunkFlower branch input.")
+    parser.add_argument("--btf-h", type=int, default=80, help="Spatial H resolution for BranchTrunkFlower.")
+    parser.add_argument("--btf-w", type=int, default=80, help="Spatial W resolution for BranchTrunkFlower.")
+    parser.add_argument("--btf-lifting-dim", type=int, default=160, help="Flower lifting dim for BranchTrunkFlower.")
+    parser.add_argument("--btf-n-levels", type=int, default=4, help="Flower level count for BranchTrunkFlower.")
+    parser.add_argument("--btf-num-heads", type=int, default=40, help="Flower attention heads for BranchTrunkFlower.")
+    parser.add_argument(
+        "--btf-boundary-condition-types",
+        nargs="+",
+        default=["ZEROS"],
+        help="Boundary condition types for BranchTrunkFlower Flower block.",
+    )
+    parser.add_argument("--btf-dropout-rate", type=float, default=0.0, help="Dropout rate for BranchTrunkFlower.")
+    parser.add_argument(
+        "--btf-channel-lift-first",
+        type=str,
+        default="true",
+        help="Whether BranchTrunkFlower branch uses linear channel lifting first (true/false).",
     )
 
     args = parser.parse_args()
@@ -283,6 +392,29 @@ def main() -> None:
                     dim4=int(cfg_kwargs.get("dim4", 256)),
                     dim5=int(cfg_kwargs.get("dim5", 512)),
                     regularization=cfg_kwargs.get("regularization", ["l2", 3e-6]),
+                )
+            elif model_key == "branch_trunk_flower":
+                model = build_branch_trunk_flower(
+                    num_parameter=int(cfg_kwargs.get("num_parameter", args.btf_num_parameter)),
+                    width=int(cfg_kwargs.get("width", args.btf_width)),
+                    Tx=int(cfg_kwargs.get("Tx", args.btf_tx)),
+                    Rx=int(cfg_kwargs.get("Rx", args.btf_rx)),
+                    T_steps=int(cfg_kwargs.get("T_steps", args.btf_t_steps)),
+                    H=int(cfg_kwargs.get("H", args.btf_h)),
+                    W=int(cfg_kwargs.get("W", args.btf_w)),
+                    lifting_dim=int(cfg_kwargs.get("lifting_dim", args.btf_lifting_dim)),
+                    n_levels=int(cfg_kwargs.get("n_levels", args.btf_n_levels)),
+                    num_heads=int(cfg_kwargs.get("num_heads", args.btf_num_heads)),
+                    boundary_condition_types=_to_str_list(
+                        cfg_kwargs.get("boundary_condition_types"),
+                        args.btf_boundary_condition_types,
+                    ),
+                    dropout_rate=float(cfg_kwargs.get("dropout_rate", args.btf_dropout_rate)),
+                    regularization=cfg_kwargs.get("regularization", ["l2", 3e-6]),
+                    channel_lift_first=_to_bool(
+                        cfg_kwargs.get("channel_lift_first", args.btf_channel_lift_first),
+                        default=True,
+                    ),
                 )
             else:
                 raise ValueError(f"Unsupported model key: {model_key}")

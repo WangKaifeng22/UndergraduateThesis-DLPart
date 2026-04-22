@@ -1,13 +1,55 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import random
-import torch
-import os
 import math
+import os
+import random
+
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+import numpy as np
+import torch
 
 # 定义物理参数用于(反)归一化
 VMIN, VMAX = 1430, 1650
 PHYSICAL_LIMIT = 0.04 # 传感器坐标的物理范围 (米)
+
+
+def _gray(m: int) -> np.ndarray:
+    g = np.arange(m, dtype=np.float64) / max(m - 1, 1)
+    g = g[:, None]
+    return np.hstack([g, g, g])
+
+
+def _hot(m: int) -> np.ndarray:
+    n = int(np.fix(3 / 8 * m))
+    r = np.concatenate([np.arange(1, n + 1) / max(n, 1), np.ones(max(m - n, 0))])
+    g = np.concatenate([
+        np.zeros(n),
+        np.arange(1, n + 1) / max(n, 1),
+        np.ones(max(m - 2 * n, 0)),
+    ])
+    denom_b = max(m - 2 * n, 1)
+    b = np.concatenate([
+        np.zeros(2 * n),
+        np.arange(1, m - 2 * n + 1) / denom_b,
+    ])
+    return np.hstack([r[:, None], g[:, None], b[:, None]])
+
+
+def _bone(m: int) -> np.ndarray:
+    return (7 * _gray(m) + np.fliplr(_hot(m))) / 8
+
+
+def get_kwave_style_colormap(num_colors: int = 256) -> ListedColormap:
+    neg_pad = int(round(48 * num_colors / 256))
+    neg = _bone(num_colors // 2 + neg_pad)
+    neg = neg[neg_pad:, :]
+    pos = np.flipud(_hot(num_colors // 2))
+    colors = np.vstack([neg, pos])
+    return ListedColormap(colors)
+
+
+KWAVE_CMAP = get_kwave_style_colormap()
+# Backward-compatible alias for existing plotting code.
+BRANCH_CMAP = KWAVE_CMAP
 
 # --- 1. 预处理工具函数 ---
 class MaxAbsScaler:
@@ -100,6 +142,47 @@ def minmax_denormalize(vid, vmin, vmax, scale=2):
     if scale == 2:
         vid = vid / 2 + 0.5
     return vid * (vmax - vmin) + vmin
+
+
+def prepare_visualization_data(
+    data,
+    *,
+    enabled: bool = True,
+    normalize_range: str = "dynamic",
+    vmin: float | None = None,
+    vmax: float | None = None,
+    scale: int = 2,
+    log_k: float = 1,
+    log_c: float = 0,
+):
+    """Apply signed log1p compression followed by minmax normalization for plotting."""
+    arr = np.asarray(data)
+    if not enabled:
+        return arr
+
+    arr = log_transform(arr, k=log_k, c=log_c)
+
+    if normalize_range == "none":
+        return arr
+
+    if normalize_range == "dynamic":
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 0:
+            return arr
+        vmin = float(finite.min())
+        vmax = float(finite.max())
+    elif normalize_range == "fixed":
+        if vmin is None or vmax is None:
+            raise ValueError("fixed normalize_range requires vmin and vmax.")
+        vmin = float(vmin)
+        vmax = float(vmax)
+    else:
+        raise ValueError("normalize_range must be 'dynamic', 'fixed', or 'none'.")
+
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+        raise ValueError(f"Invalid minmax range: vmin={vmin}, vmax={vmax}.")
+
+    return minmax_normalize(arr, vmin, vmax, scale=scale)
 
 def visualize_samples(X_branch, X_trunk, y_data, num_samples=3):
     """

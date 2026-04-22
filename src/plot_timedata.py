@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from h5_preprocess import _load_x_container, _extract_time_data
+from utils import KWAVE_CMAP, prepare_visualization_data
 
 
 def _compute_stats(arr: np.ndarray) -> Tuple[dict, str]:
@@ -67,14 +68,34 @@ def _flatten_channels(data: np.ndarray) -> np.ndarray:
     return data.reshape(-1, data.shape[-1])
 
 
-def _plot_heatmap(data: np.ndarray, title: str, save_path: str | None, show: bool) -> None:
+def _plot_heatmap(
+    data: np.ndarray,
+    title: str,
+    save_path: str | None,
+    show: bool,
+    transform_enabled: bool,
+    normalize_range: str,
+    vis_vmin: float | None,
+    vis_vmax: float | None,
+) -> None:
+    if data.ndim == 3:
+        data = data[0,:,:]
     channels = _flatten_channels(data)
+    channels = prepare_visualization_data(
+        channels,
+        enabled=transform_enabled,
+        normalize_range=normalize_range,
+        vmin=vis_vmin,
+        vmax=vis_vmax,
+        scale=2,
+    )
     fig, ax = plt.subplots(figsize=(10, 5))
-    im = ax.imshow(channels, aspect="auto", origin="lower", cmap="viridis")
+    im = ax.imshow(channels, aspect="auto", origin="lower", cmap=KWAVE_CMAP)
     ax.set_title(title)
     ax.set_xlabel("Time index")
     ax.set_ylabel("Channel")
-    fig.colorbar(im, ax=ax, label="Amplitude")
+    colorbar_label = "Transformed amplitude" if transform_enabled else "Amplitude"
+    fig.colorbar(im, ax=ax, label=colorbar_label)
     fig.tight_layout()
 
     if save_path:
@@ -91,6 +112,10 @@ def _plot_trace(
     title: str,
     save_path: str | None,
     show: bool,
+    transform_enabled: bool,
+    normalize_range: str,
+    vis_vmin: float | None,
+    vis_vmax: float | None,
 ) -> None:
     if data.ndim == 1:
         trace = data
@@ -104,6 +129,15 @@ def _plot_trace(
         rec = receiver_index or 0
         trace = data[src, rec]
         label = f"source={src}, receiver={rec}"
+
+    trace = prepare_visualization_data(
+        trace,
+        enabled=transform_enabled,
+        normalize_range=normalize_range,
+        vmin=vis_vmin,
+        vmax=vis_vmax,
+        scale=2,
+    )
 
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(trace, lw=1.0)
@@ -126,6 +160,15 @@ def main() -> None:
     parser.add_argument("--mode", choices=["heatmap", "trace"], default="heatmap", help="Plot mode")
     parser.add_argument("--source-index", type=int, default=None, help="Source index for trace mode")
     parser.add_argument("--receiver-index", type=int, default=None, help="Receiver index for trace mode")
+    parser.add_argument("--no-transform", action="store_true", help="Disable log transform and minmax normalization")
+    parser.add_argument(
+        "--normalize-range",
+        choices=["dynamic", "fixed", "none"],
+        default="dynamic",
+        help="Normalization range mode used after log transform",
+    )
+    parser.add_argument("--vis-vmin", type=float, default=None, help="Fixed normalization minimum when --normalize-range fixed")
+    parser.add_argument("--vis-vmax", type=float, default=None, help="Fixed normalization maximum when --normalize-range fixed")
     parser.add_argument("--save", default=None, help="Optional output image path")
     parser.add_argument("--no-show", action="store_true", help="Do not display the plot window")
 
@@ -147,13 +190,35 @@ def main() -> None:
     if status != "OK":
         raise ValueError("time_data_cat has no finite values; cannot plot.")
 
-    title = f"time_data_cat | {os.path.basename(x_path)}"
+    title = f"{os.path.basename(x_path)}"
     show = not args.no_show
+    transform_enabled = not args.no_transform
+    normalize_range = args.normalize_range if transform_enabled else "none"
 
     if args.mode == "heatmap":
-        _plot_heatmap(time_data, title, args.save, show)
+        _plot_heatmap(
+            time_data,
+            title,
+            args.save,
+            show,
+            transform_enabled,
+            normalize_range,
+            args.vis_vmin,
+            args.vis_vmax,
+        )
     else:
-        _plot_trace(time_data, args.source_index, args.receiver_index, title, args.save, show)
+        _plot_trace(
+            time_data,
+            args.source_index,
+            args.receiver_index,
+            title,
+            args.save,
+            show,
+            transform_enabled,
+            normalize_range,
+            args.vis_vmin,
+            args.vis_vmax,
+        )
 
 
 if __name__ == "__main__":

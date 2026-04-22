@@ -28,6 +28,7 @@ from my_test import (
     _metric_mean_std,
     compute_pcc_numpy,
     compute_ssim_numpy,
+    plot_velocity_comparison,
 )
 from my_train import samples_per_config as train_samples_per_config
 from train_NIO import build_nio
@@ -278,6 +279,20 @@ def _scenario_supported(model_type: str, scenario: str) -> bool:
     return scenario in {'clean', 'branch_noise'}
 
 
+def _select_scenarios(model_type: str, scenario_filter: str = None) -> List[str]:
+    scenarios = [scenario for scenario in _scenario_list(model_type) if _scenario_supported(model_type, scenario)]
+    if scenario_filter is None:
+        return scenarios
+
+    if scenario_filter not in scenarios:
+        supported = ', '.join(scenarios) if scenarios else 'none'
+        raise ValueError(
+            f'Unsupported scenario={scenario_filter!r} for model_type={model_type!r}. Supported: {supported}'
+        )
+
+    return [scenario_filter]
+
+
 def _prepare_batch_inputs(model_type: str, X_test, start: int, end: int, scenario: str, sigma: float, rng, clip_inputs: bool):
     if model_type in {'FourierDeepONet', 'BranchTrunkFlower'}:
         branch_np = _as_float32(X_test[0][start:end])
@@ -336,6 +351,211 @@ def _run_inference(model_type: str, net, X_test, sample_count: int, batch_size: 
     if y_pred_norm.ndim == 2:
         y_pred_norm = np.expand_dims(y_pred_norm, 0)
     return y_pred_norm
+
+
+def _sigma_to_dirname(sigma: float) -> str:
+    sigma_text = f'{float(sigma):.6g}'.replace('.', 'p')
+    return f'sigma_{sigma_text}'
+
+
+def _collect_trial_inputs_for_vis(
+    model_type: str,
+    X_test,
+    sample_count: int,
+    batch_size: int,
+    scenario: str,
+    sigma: float,
+    seed: int,
+    clip_inputs: bool,
+    top_n: int,
+):
+    n_eff = max(0, min(int(top_n), int(sample_count)))
+    if n_eff == 0:
+        return None, None, n_eff
+
+    rng = np.random.default_rng(seed)
+    branch_chunks = []
+    trunk_chunks = []
+    collected = 0
+    num_batches = sample_count // batch_size
+    if sample_count % batch_size != 0:
+        num_batches += 1
+
+    for i in range(num_batches):
+        if collected >= n_eff:
+            break
+        start = batch_size * i
+        end = min(batch_size * (i + 1), sample_count)
+        prepared = _prepare_batch_inputs(model_type, X_test, start, end, scenario, sigma, rng, clip_inputs)
+
+        if model_type in {'FourierDeepONet', 'BranchTrunkFlower'}:
+            branch_batch, trunk_batch = prepared
+            branch_chunks.append(branch_batch.detach().cpu().numpy())
+            trunk_chunks.append(trunk_batch.detach().cpu().numpy())
+            del branch_batch, trunk_batch
+        else:
+            branch_chunks.append(prepared.detach().cpu().numpy())
+            del prepared
+
+        collected += (end - start)
+
+    branch_array = np.concatenate(branch_chunks, axis=0)[:n_eff] if branch_chunks else None
+    trunk_array = np.concatenate(trunk_chunks, axis=0)[:n_eff] if trunk_chunks else None
+    return branch_array, trunk_array, n_eff
+
+
+def _save_branch_sample_2d(branch_sample: np.ndarray, save_path: str, scenario: str, sigma: float, trial_idx: int, sample_idx: int):
+    branch_2d = np.asarray(branch_sample)
+    while branch_2d.ndim > 2:
+        branch_2d = branch_2d[0]
+    if branch_2d.ndim != 2:
+        raise ValueError(f'Expected 2D branch slice after squeeze, got shape={np.shape(branch_sample)}')
+
+    fig, ax = plt.subplots(1, 1, figsize=(8.2, 3.6))
+    im = ax.imshow(branch_2d, aspect='auto', cmap=BRANCH_CMAP)
+    ax.set_xlabel('Time Steps')
+    ax.set_ylabel('Receiver Channel')
+    fig.colorbar(im, ax=ax, label='Amplitude')
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=220, bbox_inches='tight')
+    plt.close(fig)
+
+
+def _save_trunk_sample_scatter(trunk_sample: np.ndarray, save_path: str, scenario: str, sigma: float, trial_idx: int, sample_idx: int):
+    trunk_1d = np.asarray(trunk_sample).reshape(-1)
+    if trunk_1d.size % 2 != 0:
+        raise ValueError(f'Expected even trunk length for xy pairs, got {trunk_1d.size}')
+
+    xs = trunk_1d[0::2]
+    ys = trunk_1d[1::2]
+
+    fig, ax = plt.subplots(1, 1, figsize=(5.4, 5.0))
+    ax.scatter(xs, ys, c='red', marker='x')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=220, bbox_inches='tight')
+    plt.close(fig)
+
+
+def _save_trial_input_visualizations(
+    model_type: str,
+    X_test,
+    sample_count: int,
+    batch_size: int,
+    scenario: str,
+    sigma: float,
+    trial: int,
+    seed: int,
+    clip_inputs: bool,
+    top_n: int,
+    out_dir: str,
+):
+    branch_array, trunk_array, n_eff = _collect_trial_inputs_for_vis(
+        model_type=model_type,
+        X_test=X_test,
+        sample_count=sample_count,
+        batch_size=batch_size,
+        scenario=scenario,
+        sigma=sigma,
+        seed=seed,
+        clip_inputs=clip_inputs,
+        top_n=top_n,
+    )
+
+    if n_eff <= 0 or branch_array is None:
+        return
+
+    vis_dir = os.path.join(out_dir, 'input_vis', scenario, _sigma_to_dirname(sigma), f'trial_{int(trial):03d}')
+    os.makedirs(vis_dir, exist_ok=True)
+
+    branch_ok = 0
+    branch_fail = 0
+    trunk_ok = 0
+    trunk_fail = 0
+
+    for sample_idx in range(n_eff):
+        branch_path = os.path.join(vis_dir, f'branch_sample_{sample_idx:04d}.png')
+        try:
+            _save_branch_sample_2d(
+                branch_sample=branch_array[sample_idx],
+                save_path=branch_path,
+                scenario=scenario,
+                sigma=sigma,
+                trial_idx=int(trial),
+                sample_idx=sample_idx,
+            )
+            branch_ok += 1
+        except Exception as exc:
+            branch_fail += 1
+            print(f'[input_vis] branch save failed (trial={trial}, sample={sample_idx}): {exc}')
+
+        if model_type == 'FourierDeepONet' and trunk_array is not None:
+            trunk_path = os.path.join(vis_dir, f'trunk_sample_{sample_idx:04d}.png')
+            try:
+                _save_trunk_sample_scatter(
+                    trunk_sample=trunk_array[sample_idx],
+                    save_path=trunk_path,
+                    scenario=scenario,
+                    sigma=sigma,
+                    trial_idx=int(trial),
+                    sample_idx=sample_idx,
+                )
+                trunk_ok += 1
+            except Exception as exc:
+                trunk_fail += 1
+                print(f'[input_vis] trunk save failed (trial={trial}, sample={sample_idx}): {exc}')
+
+    print(
+        f'[input_vis] scenario={scenario} sigma={sigma:.6g} trial={trial} '
+        f'top_n={n_eff} branch(ok/fail)={branch_ok}/{branch_fail} '
+        f'trunk(ok/fail)={trunk_ok}/{trunk_fail} dir={vis_dir}'
+    )
+
+
+def _save_trial_prediction_visualizations(
+    y_pred_norm: np.ndarray,
+    sample_count: int,
+    scenario: str,
+    sigma: float,
+    trial: int,
+    top_n: int,
+    out_dir: str,
+    sosmap_size: Tuple[int, int],
+):
+    n_eff = max(0, min(int(top_n), int(sample_count), int(len(y_pred_norm))))
+    if n_eff <= 0:
+        return
+
+    pred_dir = os.path.join(out_dir, 'pred_vis', scenario, _sigma_to_dirname(sigma), f'trial_{int(trial):03d}')
+    os.makedirs(pred_dir, exist_ok=True)
+
+    y_pred_real = minmax_denormalize(y_pred_norm, VMIN, VMAX, scale=2)
+
+    pred_ok = 0
+    pred_fail = 0
+    for sample_idx in range(n_eff):
+        pred_path = os.path.join(pred_dir, f'pred_sample_{sample_idx:04d}.png')
+        try:
+            plot_velocity_comparison(
+                y_true=None,
+                y_pred=y_pred_real,
+                sample_idx=sample_idx,
+                save_path=pred_path,
+                sosmap_size=tuple(sosmap_size),
+                has_ground_truth=False,
+            )
+            pred_ok += 1
+        except Exception as exc:
+            pred_fail += 1
+            print(f'[pred_vis] save failed (trial={trial}, sample={sample_idx}): {exc}')
+
+    print(
+        f'[pred_vis] scenario={scenario} sigma={sigma:.6g} trial={trial} '
+        f'top_n={n_eff} pred(ok/fail)={pred_ok}/{pred_fail} dir={pred_dir}'
+    )
 
 
 def _evaluate_predictions(y_true_orig, y_pred_norm, has_ground_truth: bool):
@@ -413,9 +633,8 @@ def _plot_summary(result_rows: List[Dict[str, Any]], out_dir: str, model_type: s
             if xs:
                 ax.errorbar(xs, ys, yerr=yerr, marker='o', capsize=3, linewidth=1.8, label=scenario)
 
-        ax.set_xlabel('Sigma')
+        ax.set_xlabel('Standard deviation of noise')
         ax.set_ylabel(metric_titles[metric])
-        ax.set_title(f'{model_type} robustness: {metric_titles[metric]} vs Sigma')
         ax.grid(True, alpha=0.3)
         ax.legend()
         plt.tight_layout()
@@ -460,6 +679,210 @@ def _summarize_rows(rows: Sequence[Dict[str, Any]]):
     return list(summary.values())
 
 
+def _load_summary_csv(csv_path: str) -> List[Dict[str, Any]]:
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f'Summary CSV not found: {csv_path}')
+
+    rows: List[Dict[str, Any]] = []
+    with open(csv_path, 'r', encoding='utf-8', newline='') as f:
+        reader = csv.DictReader(f)
+        required_cols = {
+            'scenario',
+            'sigma',
+            'mae_mean',
+            'rmse_mean',
+            'ssim_mean',
+            'pcc_mean',
+            'l2_mean',
+        }
+        missing = required_cols.difference(set(reader.fieldnames or []))
+        if missing:
+            raise ValueError(f'Missing columns in {csv_path}: {sorted(missing)}')
+
+        for row in reader:
+            rows.append(row)
+
+    return rows
+
+
+def _plot_branch_noise_model_comparison(
+    summary_csv_paths: Sequence[str],
+    model_labels: Sequence[str],
+    output_path: str,
+    xscale: str = 'linear',
+):
+    if len(summary_csv_paths) != 3:
+        raise ValueError('Exactly three summary CSV files are required (InversionNet, NIO, Fourier-DeepONet).')
+    if len(model_labels) != 3:
+        raise ValueError('Exactly three model labels are required.')
+
+    metric_keys = ['mae_mean', 'rmse_mean', 'ssim_mean', 'pcc_mean', 'l2_mean']
+    metric_ylabel = {
+        'mae_mean': 'MAE(m/s)',
+        'rmse_mean': 'RMSE(m/s)',
+        'ssim_mean': 'SSIM',
+        'pcc_mean': 'PCC',
+        'l2_mean': 'L2 relative error',
+    }
+
+    model_sigma_to_metrics: List[Dict[float, Dict[str, float]]] = []
+
+    for csv_path in summary_csv_paths:
+        rows = _load_summary_csv(csv_path)
+        branch_rows = [row for row in rows if str(row.get('scenario', '')).strip() == 'branch_noise']
+        if not branch_rows:
+            raise ValueError(f'No branch_noise rows found in {csv_path}')
+
+        sigma_map: Dict[float, Dict[str, float]] = {}
+        for row in branch_rows:
+            sigma = float(row['sigma'])
+            sigma_map[sigma] = {
+                'mae_mean': float(row['mae_mean']),
+                'rmse_mean': float(row['rmse_mean']),
+                'ssim_mean': float(row['ssim_mean']),
+                'pcc_mean': float(row['pcc_mean']),
+                'l2_mean': float(row['l2_mean']),
+            }
+        model_sigma_to_metrics.append(sigma_map)
+
+    common_sigma = sorted(set.intersection(*[set(d.keys()) for d in model_sigma_to_metrics]))
+    if not common_sigma:
+        raise ValueError('No common sigma values across all three models for branch_noise.')
+
+    xscale = str(xscale).strip().lower()
+    if xscale not in {'linear', 'log'}:
+        raise ValueError(f'Unsupported xscale={xscale!r}. Expected "linear" or "log".')
+    if xscale == 'log' and any(sigma <= 0.0 for sigma in common_sigma):
+        raise ValueError('Log x-axis requires all sigma values to be > 0.')
+
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+    markers = ['o', 's', '^']
+
+    metric_to_axis = {
+        'mae_mean': axes[0, 0],
+        'rmse_mean': axes[0, 1],
+        'ssim_mean': axes[1, 0],
+        'pcc_mean': axes[1, 1],
+        'l2_mean': axes[1, 2],
+    }
+
+    for metric_key in metric_keys:
+        ax = metric_to_axis[metric_key]
+        for model_idx, label in enumerate(model_labels):
+            ys = [model_sigma_to_metrics[model_idx][sigma][metric_key] for sigma in common_sigma]
+            ax.plot(common_sigma, ys, marker=markers[model_idx], linewidth=1.8, markersize=4.5, label=label)
+
+        ax.set_xscale(xscale)
+        ax.set_xlabel('Noise sigma', fontsize=16)
+        ax.set_ylabel(metric_ylabel[metric_key], fontsize=16)
+        ax.grid(True, alpha=0.3)
+
+    legend_ax = axes[0, 2]
+    legend_ax.axis('off')
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    legend_ax.legend(handles, labels, loc='center', frameon=False, fontsize=18)
+
+    plt.tight_layout()
+
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    fig.savefig(output_path, dpi=500, bbox_inches='tight')
+    plt.close(fig)
+
+    print(f'Comparison plot saved to: {output_path}')
+
+
+def _plot_fourier_scenarios_comparison(
+    summary_csv_path: str,
+    output_path: str,
+    xscale: str = 'linear',
+    scenario_labels: Sequence[str] = None,
+):
+    rows = _load_summary_csv(summary_csv_path)
+
+    scenario_order = ['branch_noise', 'trunk_noise', 'branch_plus_trunk_noise']
+    default_labels = ['Branch noise', 'Trunk noise', 'Branch noise + Trunk noise']
+    if scenario_labels is None:
+        scenario_labels = default_labels
+    if len(scenario_labels) != len(scenario_order):
+        raise ValueError('Exactly three scenario labels are required.')
+
+    metric_keys = ['mae_mean', 'rmse_mean', 'ssim_mean', 'pcc_mean', 'l2_mean']
+    metric_ylabel = {
+        'mae_mean': 'MAE(m/s)',
+        'rmse_mean': 'RMSE(m/s)',
+        'ssim_mean': 'SSIM',
+        'pcc_mean': 'PCC',
+        'l2_mean': 'L2 relative error',
+    }
+
+    scenario_sigma_to_metrics: Dict[str, Dict[float, Dict[str, float]]] = {}
+    for scenario in scenario_order:
+        scenario_rows = [row for row in rows if str(row.get('scenario', '')).strip() == scenario]
+        if not scenario_rows:
+            raise ValueError(f'No {scenario} rows found in {summary_csv_path}')
+
+        sigma_map: Dict[float, Dict[str, float]] = {}
+        for row in scenario_rows:
+            sigma = float(row['sigma'])
+            sigma_map[sigma] = {
+                'mae_mean': float(row['mae_mean']),
+                'rmse_mean': float(row['rmse_mean']),
+                'ssim_mean': float(row['ssim_mean']),
+                'pcc_mean': float(row['pcc_mean']),
+                'l2_mean': float(row['l2_mean']),
+            }
+        scenario_sigma_to_metrics[scenario] = sigma_map
+
+    common_sigma = sorted(set.intersection(*[set(d.keys()) for d in scenario_sigma_to_metrics.values()]))
+    if not common_sigma:
+        raise ValueError('No common sigma values across branch_noise, trunk_noise, and branch_plus_trunk_noise.')
+
+    xscale = str(xscale).strip().lower()
+    if xscale not in {'linear', 'log'}:
+        raise ValueError(f'Unsupported xscale={xscale!r}. Expected "linear" or "log".')
+    if xscale == 'log' and any(sigma <= 0.0 for sigma in common_sigma):
+        raise ValueError('Log x-axis requires all sigma values to be > 0.')
+
+    fig, axes = plt.subplots(2, 3, figsize=(14.5, 8.2))
+    markers = ['o', 's', '^']
+
+    metric_to_axis = {
+        'mae_mean': axes[0, 0],
+        'rmse_mean': axes[0, 1],
+        'ssim_mean': axes[1, 0],
+        'pcc_mean': axes[1, 1],
+        'l2_mean': axes[1, 2],
+    }
+
+    for metric_key in metric_keys:
+        ax = metric_to_axis[metric_key]
+        for scenario_idx, scenario in enumerate(scenario_order):
+            ys = [scenario_sigma_to_metrics[scenario][sigma][metric_key] for sigma in common_sigma]
+            ax.plot(common_sigma, ys, marker=markers[scenario_idx], linewidth=1.8, markersize=4.5, label=scenario_labels[scenario_idx])
+
+        ax.set_xscale(xscale)
+        ax.set_xlabel('Noise sigma', fontsize=16)
+        ax.set_ylabel(metric_ylabel[metric_key], fontsize=16)
+        ax.grid(True, alpha=0.3)
+
+    legend_ax = axes[0, 2]
+    legend_ax.axis('off')
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    legend_ax.legend(handles, labels, loc='center', frameon=False, fontsize=18)
+
+    plt.tight_layout()
+
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    fig.savefig(output_path, dpi=500, bbox_inches='tight')
+    plt.close(fig)
+
+    print(f'Fourier scenario comparison plot saved to: {output_path}')
+
+
 def main(
     model_path,
     result_dir,
@@ -476,12 +899,47 @@ def main(
     base_noise_seed=114514,
     clip_inputs=False,
     save_npy=False,
+    vis_top_n=1,
+    scenario=None,
+    compare_summary_csvs=None,
+    compare_model_labels=None,
+    compare_output_path=None,
+    compare_xscale='linear',
+    compare_fourier_summary_csv=None,
+    compare_fourier_output_path=None,
+    compare_fourier_scenario_labels=None,
 ):
+    if compare_fourier_summary_csv:
+        output_path = compare_fourier_output_path
+        if not output_path:
+            base_dir = os.path.dirname(compare_fourier_summary_csv)
+            output_path = os.path.join(base_dir, 'fourier_deeponet_scenarios_2x3.png')
+
+        _plot_fourier_scenarios_comparison(
+            summary_csv_path=compare_fourier_summary_csv,
+            output_path=output_path,
+            xscale=compare_xscale,
+            scenario_labels=compare_fourier_scenario_labels,
+        )
+        return
+
+    if compare_summary_csvs:
+        labels = compare_model_labels or ['InversionNet', 'NIO', 'Fourier-DeepONet']
+        output_path = compare_output_path
+        if not output_path:
+            output_path = os.path.join(os.path.dirname(compare_summary_csvs[0]), 'branch_noise_model_comparison.png')
+
+        _plot_branch_noise_model_comparison(
+            summary_csv_paths=compare_summary_csvs,
+            model_labels=labels,
+            output_path=output_path,
+            xscale=compare_xscale,
+        )
+        return
+
     if sigma_list is None:
         sigma_list = [0.0, 0.01, 0.05, 0.1, 0.2]
     sigma_list = [float(sigma) for sigma in sigma_list]
-    if 0.0 not in sigma_list:
-        sigma_list = [0.0] + sigma_list
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -569,15 +1027,19 @@ def main(
 
     net.eval()
 
-    scenarios = [scenario for scenario in _scenario_list(model_type) if _scenario_supported(model_type, scenario)]
+    scenarios = _select_scenarios(model_type, scenario_filter=scenario)
     if model_type in {'InversionNet', 'NIO'}:
         print('Note: only branch noise is evaluated for InversionNet and NIO.')
+    elif scenario is not None:
+        print(f'Scenario filter enabled: {scenario}')
 
     result_rows = []
     out_dir = os.path.join(result_dir, 'robustness')
     os.makedirs(out_dir, exist_ok=True)
 
     print('--- 5. Robustness Sweep ---')
+    n_eff_global = max(0, min(int(vis_top_n), int(sample_count)))
+    print(f'Input visualization: vis_top_n={int(vis_top_n)}, effective_top_n={n_eff_global}')
     scenario_seed_offset = {
         'clean': 0,
         'branch_noise': 1000,
@@ -604,6 +1066,31 @@ def main(
                     clip_inputs=clip_inputs,
                 )
                 metrics = _evaluate_predictions(y_true_orig, y_pred_norm, has_ground_truth)
+
+                if n_eff_global > 0:
+                    _save_trial_input_visualizations(
+                        model_type=model_type,
+                        X_test=X_test,
+                        sample_count=sample_count,
+                        batch_size=batch_size,
+                        scenario=scenario,
+                        sigma=float(sigma),
+                        trial=int(trial),
+                        seed=trial_seed,
+                        clip_inputs=clip_inputs,
+                        top_n=n_eff_global,
+                        out_dir=out_dir,
+                    )
+                    _save_trial_prediction_visualizations(
+                        y_pred_norm=y_pred_norm,
+                        sample_count=sample_count,
+                        scenario=scenario,
+                        sigma=float(sigma),
+                        trial=int(trial),
+                        top_n=n_eff_global,
+                        out_dir=out_dir,
+                        sosmap_size=sosmap_size,
+                    )
 
                 row = {
                     'model_type': model_type,
@@ -649,7 +1136,7 @@ def _parse_args():
     parser = argparse.ArgumentParser(description='Robustness evaluation with Gaussian noise on branch/trunk inputs.')
     parser.add_argument('--model-path', type=str, required=True, help='Path to .pt checkpoint.')
     parser.add_argument('--result-dir', type=str, required=True, help='Directory to save robustness results.')
-    parser.add_argument('--model-type', type=str, default='FourierDeepONet', help='Model type if not provided by model_config.json.')
+    parser.add_argument('--model-type', type=str, default='NIO', help='Model type if not provided by model_config.json.')
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--split-ratio', type=float, default=0.9)
     parser.add_argument('--total-data-num', type=int, default=50000)
@@ -657,11 +1144,20 @@ def _parse_args():
     parser.add_argument('--cache-h5-path', type=str, default="/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125.h5")
     parser.add_argument('--cache-meta-path', type=str, default="/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125_meta.json")
     parser.add_argument('--has-ground-truth', type=str2bool, default=True)
-    parser.add_argument('--sigma-list', type=float, nargs='+', default=[0.01, 0.02, 0.05, 0.1, 0.2, 0.5])
+    parser.add_argument('--sigma-list', type=float, nargs='+', default=[0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1])
     parser.add_argument('--noise-trials', type=int, default=3)
     parser.add_argument('--base-noise-seed', type=int, default=114514)
     parser.add_argument('--clip-inputs', type=str2bool, default=False)
     parser.add_argument('--save-npy', type=str2bool, default=False)
+    parser.add_argument('--vis-top-n', type=int, default=5, help='For each trial, visualize the first N test samples.')
+    parser.add_argument('--scenario', type=str, default=None, help='For FourierDeepONet/BranchTrunkFlower, run only one scenario such as clean, branch_noise, trunk_noise, or branch_plus_trunk_noise.')
+    parser.add_argument('--compare-summary-csvs', type=str, nargs='*', default=None, help='Three robustness_summary.csv files (InversionNet, NIO, Fourier-DeepONet) for branch_noise comparison plotting.')
+    parser.add_argument('--compare-model-labels', type=str, nargs='*', default=None, help='Three legend labels matching --compare-summary-csvs order.')
+    parser.add_argument('--compare-output-path', type=str, default=None, help='Output image path for branch_noise comparison plot.')
+    parser.add_argument('--compare-xscale', type=str, default='linear', choices=['linear', 'log'], help='X-axis scale for comparison plot: linear or log.')
+    parser.add_argument('--compare-fourier-summary-csv', type=str, default=None, help='Fourier-DeepONet robustness_summary.csv for branch/trunk/combined scenario comparison plotting.')
+    parser.add_argument('--compare-fourier-output-path', type=str, default=None, help='Output image path for Fourier-DeepONet scenario comparison plot.')
+    parser.add_argument('--compare-fourier-scenario-labels', type=str, nargs='*', default=None, help='Three legend labels for branch_noise, trunk_noise, and branch_plus_trunk_noise.')
     return parser.parse_args()
 
 
@@ -683,4 +1179,13 @@ if __name__ == '__main__':
         base_noise_seed=args.base_noise_seed,
         clip_inputs=args.clip_inputs,
         save_npy=args.save_npy,
+        vis_top_n=args.vis_top_n,
+        scenario=args.scenario,
+        compare_summary_csvs=args.compare_summary_csvs,
+        compare_model_labels=args.compare_model_labels,
+        compare_output_path=args.compare_output_path,
+        compare_xscale=args.compare_xscale,
+        compare_fourier_summary_csv=args.compare_fourier_summary_csv,
+        compare_fourier_output_path=args.compare_fourier_output_path,
+        compare_fourier_scenario_labels=args.compare_fourier_scenario_labels,
     )

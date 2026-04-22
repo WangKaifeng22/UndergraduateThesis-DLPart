@@ -94,15 +94,15 @@ def main(
 
     trunk_dim = data.trunk_dim
 
-    width = 128
+    width = 160
     Tx = 32
     Rx = 32
     T_steps = 1900
     H = 80
     W = 80
-    lifting_dim = 128
+    lifting_dim = 160
     n_levels = 4
-    num_heads = 32
+    num_heads = 40
     boundary_condition_types = ["ZEROS"]
     dropout_rate = 0.0
     regularization = ["l2", 3e-6]
@@ -209,7 +209,7 @@ def main(
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test1_DFlower_CLF_128width_0.140625-0.453125'
+    path = f'./model_{dataset}_{task}_test1_DFlower_CLF_160width_40heads_0.140625-0.453125'
     os.makedirs(path, exist_ok=True)
     model_path = None
     main(

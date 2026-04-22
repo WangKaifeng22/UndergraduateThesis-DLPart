@@ -255,7 +255,9 @@ def _extract_time_data(x_kind: str, x_obj: Any) -> np.ndarray:
         return x_obj["time_data_cat"]
     if "time_data_cat" in x_obj:
         return x_obj["time_data_cat"]
-    raise KeyError("time_data_cat not found in input")
+    elif "rf_data" in x_obj: #IUS QUASOS Dataset
+        return x_obj["rf_data"].transpose(1,0,2) #(Rx, Tx, Time) -> (Tx, Rx, Time)
+    raise KeyError("time_data_cat/rf_data not found in input")
 
 
 def _extract_freq_data(x_kind: str, x_obj: Any) -> np.ndarray:
