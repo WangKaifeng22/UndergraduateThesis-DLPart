@@ -4,6 +4,7 @@ from utils import *
 os.environ['DDE_BACKEND'] = 'pytorch'
 import deepxde as dde
 from model_Unet_CNN import FourierDeepONet
+from model_original import FourierDeepONet_Origin
 from multi_data import get_dataset
 from deepxde.callbacks import Callback
 from soap import SOAP
@@ -204,7 +205,7 @@ meta_h5_path = "/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125
 
 
 def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False, test: bool = False,
-         model_path=None, path=None,
+         model_path=None, path=None, original=False,
          start_iteration=0, total_epoch=250, enable_timing: bool = True, split_ratio = 0.8, seed = 114514):
     set_seed(seed)
     total_data_num = int(samples_per_config * len(x_params))
@@ -241,9 +242,14 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
     use_hfs_block123 = False
     hfs_patch_size = (16, 8, 4)
 
-    net = FourierDeepONet(num_parameter=trunk_dim, width=width, modes1=modes1, modes2=modes2,
-                          regularization=regularization, merge_operation=merge_operation,
-                          use_hfs_block123=use_hfs_block123, hfs_patch_size=hfs_patch_size)
+    if not original:
+        net = FourierDeepONet(num_parameter=trunk_dim, width=width, modes1=modes1, modes2=modes2,
+                                regularization=regularization, merge_operation=merge_operation,
+                                use_hfs_block123=use_hfs_block123, hfs_patch_size=hfs_patch_size)
+    else:
+        net = FourierDeepONet_Origin(num_parameter=trunk_dim, width=width, modes1=modes1, modes2=modes2,
+                                      regularization=regularization, merge_operation=merge_operation,
+                                      )
     model = dde.Model(data, net)
 
     # --- save model build config before training (no weights) ---
@@ -397,10 +403,10 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test0_0.140625-0.453125'
+    path = f'./model_{dataset}_{task}_test0_original_0.140625-0.453125'
     model_path = None
     os.makedirs(path, exist_ok=True)
     main(dataset=dataset, task=task, batch_size=32, lazy=True, test=False,
-         model_path=model_path, path=path, 
-         start_iteration=0, total_epoch=200, enable_timing=True, split_ratio=0.9, seed=114514)
+         model_path=model_path, path=path, original=True,
+         start_iteration=0, total_epoch=200, enable_timing=False, split_ratio=0.9, seed=114514)
 
