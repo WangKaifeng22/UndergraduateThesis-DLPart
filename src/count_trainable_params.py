@@ -9,8 +9,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
+from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+
 from InversionNet import InversionNet
-from model_Unet_CNN import FourierDeepONet
 from nio_build_utils import (
     extract_nio_build_kwargs,
     resolve_nio_branch_encoder_cls,
@@ -92,11 +93,11 @@ def build_fourier_deeponet(
     merge_operation: str = "mul",
     use_hfs_block123 = True,
     hfs_patch_size = (16, 8, 4),
+    original: bool = False,
 ) -> torch.nn.Module:
-    if regularization is None:
-        regularization = ["l2", 3e-6]
-    return FourierDeepONet(
-        num_parameter=num_parameter,
+    return build_fourier_deeponet_variant(
+        trunk_dim=num_parameter,
+        original=original,
         width=width,
         modes1=modes1,
         modes2=modes2,
@@ -227,6 +228,10 @@ def load_model_config(path: Path) -> Dict[str, Any]:
     return payload
 
 
+def is_original_from_config(cfg: Dict[str, Any]) -> bool:
+    return is_original_fourier_deeponet_config(cfg)
+
+
 def get_model_kwargs_from_config(model_key: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
     if "model_type" in cfg:
         cfg_model_key = normalize_model_key(str(cfg["model_type"]))
@@ -347,6 +352,7 @@ def main() -> None:
 
         for model_key in models_to_run:
             cfg_kwargs = get_model_kwargs_from_config(model_key, model_cfg) if model_cfg else {}
+            is_original = is_original_from_config(model_cfg) if model_cfg else False
 
             if model_key == "fourier_deeponet":
                 model = build_fourier_deeponet(
@@ -356,6 +362,7 @@ def main() -> None:
                     modes2=int(cfg_kwargs.get("modes2", 20)),
                     regularization=cfg_kwargs.get("regularization", ["l2", 3e-6]),
                     merge_operation=str(cfg_kwargs.get("merge_operation", "mul")),
+                    original=is_original,
                 )
             elif model_key == "nio":
                 requested_trunk_activation = str(cfg_kwargs.get("trunk_activation", args.nio_trunk_activation))

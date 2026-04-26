@@ -8,6 +8,8 @@ from typing import Any, Dict, Tuple
 import numpy as np
 import torch
 
+from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+
 
 def str2bool(value: Any) -> bool:
     if isinstance(value, bool):
@@ -25,10 +27,11 @@ def _sync_if_cuda(device: torch.device) -> None:
         torch.cuda.synchronize()
 
 
-def _read_model_config(model_path: str, model_type: str) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+def _read_model_config(model_path: str, model_type: str) -> Tuple[str, Dict[str, Any], Dict[str, Any], bool]:
     model_init_kwargs = None
     data_cfg = None
     model_type_raw = model_type
+    is_original = False
 
     model_config_path = os.path.join(os.path.dirname(model_path), "model_config.json")
     if os.path.exists(model_config_path):
@@ -38,8 +41,10 @@ def _read_model_config(model_path: str, model_type: str) -> Tuple[str, Dict[str,
             model_type_raw = model_config.get("model_type", model_type)
             model_init_kwargs = model_config.get("model_init_kwargs")
             data_cfg = model_config.get("data", None)
+            is_original = is_original_fourier_deeponet_config(model_config)
             print(f"Loaded model config from: {model_config_path}")
             print(f"Auto model_type from config: {model_type_raw}")
+            print(f"Auto is_original from config: {is_original}")
         except Exception as exc:
             print(f"Warning: failed to read model_config.json: {exc}")
 
@@ -51,7 +56,7 @@ def _read_model_config(model_path: str, model_type: str) -> Tuple[str, Dict[str,
         "NIOUltrasoundCTAbl": "NIO",
     }
     model_type_final = model_type_alias.get(model_type_raw, model_type_raw)
-    return model_type_final, model_init_kwargs, data_cfg
+    return model_type_final, model_init_kwargs, data_cfg, is_original
 
 
 def _load_test_data(
@@ -156,7 +161,7 @@ def _load_test_data(
     return X_test, sample_count, split_ratio
 
 
-def _build_model(model_type: str, model_init_kwargs: Dict[str, Any], X_test, device: torch.device):
+def _build_model(model_type: str, model_init_kwargs: Dict[str, Any], X_test, device: torch.device, is_original: bool = False):
     from InversionNet import InversionNet
     from model_BranchTrunkFlower import BranchTrunkFlower
     from nio_build_utils import (
@@ -164,12 +169,11 @@ def _build_model(model_type: str, model_init_kwargs: Dict[str, Any], X_test, dev
         resolve_nio_branch_encoder_cls,
         resolve_nio_branch_encoder_kwargs,
     )
-    from model_Unet_CNN import FourierDeepONet
     from train_NIO import build_nio
 
     if model_type in {"FourierDeepONet", "BranchTrunkFlower"}:
         if isinstance(model_init_kwargs, dict):
-            net = BranchTrunkFlower(**model_init_kwargs) if model_type == "BranchTrunkFlower" else FourierDeepONet(**model_init_kwargs)
+            net = BranchTrunkFlower(**model_init_kwargs) if model_type == "BranchTrunkFlower" else build_fourier_deeponet_variant(model_init_kwargs, original=is_original)
         else:
             trunk_dim = X_test[1].shape[1]
             if model_type == "BranchTrunkFlower":
@@ -190,8 +194,9 @@ def _build_model(model_type: str, model_init_kwargs: Dict[str, Any], X_test, dev
                     channel_lift_first=True,
                 )
             else:
-                net = FourierDeepONet(
-                    num_parameter=trunk_dim,
+                net = build_fourier_deeponet_variant(
+                    trunk_dim=trunk_dim,
+                    original=is_original,
                     width=64,
                     modes1=16,
                     modes2=16,
@@ -234,7 +239,7 @@ def _run_benchmark(args):
         torch.cuda.empty_cache()
     gc.collect()
 
-    model_type, model_init_kwargs, data_cfg = _read_model_config(args.model_path, args.model_type)
+    model_type, model_init_kwargs, data_cfg, is_original = _read_model_config(args.model_path, args.model_type)
     X_test, sample_count, split_ratio = _load_test_data(
         model_type=model_type,
         model_init_kwargs=model_init_kwargs,
@@ -253,7 +258,7 @@ def _run_benchmark(args):
     if sample_count <= 0:
         raise ValueError("No test samples found.")
 
-    net = _build_model(model_type, model_init_kwargs, X_test, device)
+    net = _build_model(model_type, model_init_kwargs, X_test, device, is_original=is_original)
 
     checkpoint = torch.load(args.model_path, map_location=device)
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:

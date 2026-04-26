@@ -14,7 +14,7 @@ import torch
 
 from InversionNet import InversionNet
 from model_BranchTrunkFlower import BranchTrunkFlower
-from model_Unet_CNN import FourierDeepONet
+from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
 from nio_build_utils import (
     extract_nio_build_kwargs as _extract_nio_build_kwargs,
     resolve_nio_branch_encoder_cls as _resolve_nio_branch_encoder_cls,
@@ -53,6 +53,7 @@ def _read_model_config(model_path: str, model_type: str):
     model_init_kwargs = None
     data_cfg = None
     model_type_raw = model_type
+    is_original = False
 
     model_config_path = os.path.join(os.path.dirname(model_path), 'model_config.json')
     if os.path.exists(model_config_path):
@@ -62,8 +63,10 @@ def _read_model_config(model_path: str, model_type: str):
             model_type_raw = model_config.get('model_type', model_type)
             model_init_kwargs = model_config.get('model_init_kwargs')
             data_cfg = model_config.get('data', None)
+            is_original = is_original_fourier_deeponet_config(model_config)
             print(f'Loaded model config from: {model_config_path}')
             print(f'Auto model_type from config: {model_type_raw}')
+            print(f'Auto is_original from config: {is_original}')
         except Exception as exc:
             print(f'Warning: failed to read model_config.json: {exc}')
 
@@ -75,7 +78,7 @@ def _read_model_config(model_path: str, model_type: str):
         'NIOUltrasoundCTAbl': 'NIO',
     }
     model_type_final = model_type_alias.get(model_type_raw, model_type_raw)
-    return model_type_final, model_init_kwargs, data_cfg
+    return model_type_final, model_init_kwargs, data_cfg, is_original
 
 
 def _load_test_data(
@@ -176,10 +179,10 @@ def _load_test_data(
     return X_test, y_true_orig, sample_count, split_ratio
 
 
-def _build_model(model_type: str, model_init_kwargs: Dict[str, Any], X_test, sosmap_size, device: torch.device):
+def _build_model(model_type: str, model_init_kwargs: Dict[str, Any], X_test, sosmap_size, device: torch.device, is_original: bool = False):
     if model_type in {'FourierDeepONet', 'BranchTrunkFlower'}:
         if isinstance(model_init_kwargs, dict):
-            net = BranchTrunkFlower(**model_init_kwargs) if model_type == 'BranchTrunkFlower' else FourierDeepONet(**model_init_kwargs)
+            net = BranchTrunkFlower(**model_init_kwargs) if model_type == 'BranchTrunkFlower' else build_fourier_deeponet_variant(model_init_kwargs, original=is_original)
         else:
             trunk_dim = X_test[1].shape[1]
             if model_type == 'BranchTrunkFlower':
@@ -200,8 +203,9 @@ def _build_model(model_type: str, model_init_kwargs: Dict[str, Any], X_test, sos
                     channel_lift_first=True,
                 )
             else:
-                net = FourierDeepONet(
-                    num_parameter=trunk_dim,
+                net = build_fourier_deeponet_variant(
+                    trunk_dim=trunk_dim,
+                    original=is_original,
                     width=64,
                     modes1=16,
                     modes2=16,

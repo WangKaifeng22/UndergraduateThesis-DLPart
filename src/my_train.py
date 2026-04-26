@@ -3,14 +3,14 @@ from utils import *
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ['DDE_BACKEND'] = 'pytorch'
 import deepxde as dde
-from model_Unet_CNN import FourierDeepONet
-from model_original import FourierDeepONet_Origin
 from multi_data import get_dataset
 from deepxde.callbacks import Callback
 from soap import SOAP
 from muon import MuonWithAuxAdam
 import json
 import time
+
+from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
 
 # HDF5 backed dataset (lazy loading)
 from h5_dataset import H5DeepONetDataset, H5DatasetConfig
@@ -205,11 +205,26 @@ meta_h5_path = "/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125
 
 
 def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False, test: bool = False,
-         model_path=None, path=None, original=False,
+         model_path=None, path=None, original=None,
          start_iteration=0, total_epoch=250, enable_timing: bool = True, split_ratio = 0.8, seed = 114514):
     set_seed(seed)
     total_data_num = int(samples_per_config * len(x_params))
     test_batch_size = int(batch_size * ((1 - split_ratio) / split_ratio))
+
+    if original is None and model_path is not None:
+        model_config_path = os.path.join(os.path.dirname(model_path), "model_config.json")
+        if os.path.exists(model_config_path):
+            try:
+                with open(model_config_path, "r", encoding="utf-8") as f:
+                    model_config = json.load(f)
+                original = is_original_fourier_deeponet_config(model_config)
+                print(f"Loaded model config from: {model_config_path}")
+                print(f"Auto is_original from config: {original}")
+            except Exception as exc:
+                print(f"Warning: failed to read model_config.json: {exc}")
+
+    if original is None:
+        original = False
 
     # 如果提供 HDF5 cache，则用 lazy 方式读取，避免 OOM
     if lazy:
@@ -242,19 +257,23 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
     use_hfs_block123 = False
     hfs_patch_size = (16, 8, 4)
 
-    if not original:
-        net = FourierDeepONet(num_parameter=trunk_dim, width=width, modes1=modes1, modes2=modes2,
-                                regularization=regularization, merge_operation=merge_operation,
-                                use_hfs_block123=use_hfs_block123, hfs_patch_size=hfs_patch_size)
-    else:
-        net = FourierDeepONet_Origin(num_parameter=trunk_dim, width=width, modes1=modes1, modes2=modes2,
-                                      regularization=regularization, merge_operation=merge_operation,
-                                      )
+    net = build_fourier_deeponet_variant(
+        trunk_dim=trunk_dim,
+        original=original,
+        width=width,
+        modes1=modes1,
+        modes2=modes2,
+        regularization=regularization,
+        merge_operation=merge_operation,
+        use_hfs_block123=use_hfs_block123,
+        hfs_patch_size=hfs_patch_size,
+    )
     model = dde.Model(data, net)
 
     # --- save model build config before training (no weights) ---
     model_config = {
         "model_type": "FourierDeepONet",
+        "is_original": original,
         "model_init_kwargs": {
             "num_parameter": int(trunk_dim),
             "width": width,
