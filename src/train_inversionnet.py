@@ -391,8 +391,11 @@ def main(
             start_iteration=start_iteration,
             log_histograms=tensorboard_histograms,
         )
-    else:
+    if not enable_tensorboard and not enable_swanlab:
         loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
+
+    if enable_tensorboard and enable_swanlab:
+        print("Warning: Both TensorBoard and SwanLab logging are enabled. This may lead to redundant logs.")
 
     swanlab_logger = None
     if enable_swanlab:

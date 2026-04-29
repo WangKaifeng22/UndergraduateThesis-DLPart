@@ -6,7 +6,7 @@ import deepxde as dde
 from multi_data import get_dataset
 from deepxde.callbacks import Callback
 from soap import SOAP
-from muon import MuonWithAuxAdam
+from muon import SingleDeviceMuonWithAuxAdam
 import json
 import time
 
@@ -318,7 +318,7 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
     elif optimizer_name == "muon":  # muon适用batch size较大时
         # 1. 定义哪些模块属于 "Embedding" (输入层) 和 "Head" (输出层)
         # 这些部分的参数全部使用 AdamW
-        embed_modules = [net.branch, net.trunk, net.fusion_layer]
+        embed_modules = [net.branch, net.trunk]
         head_modules = [net.merger.out_conv2]
 
         # 获取这些模块所有参数的 ID，用于后续从主体中排除
@@ -361,7 +361,7 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
         ]
 
         # 4. 实例化优化器
-        optimizer = MuonWithAuxAdam(param_groups)
+        optimizer = SingleDeviceMuonWithAuxAdam(param_groups)
     # elif optimizer_name == "auon":
     elif optimizer_name == "adam" or optimizer_name == "adamw":
         optimizer = optimizer_name
@@ -388,6 +388,12 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
 
     tensorboard_logger = None
     loss_logger = None
+    if not enable_tensorboard and not enable_swanlab:
+        loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
+    
+    if enable_tensorboard and enable_swanlab:
+        print("Warning: Both TensorBoard and SwanLab logging are enabled. This may lead to redundant logs.")
+
     if enable_tensorboard:
         if tensorboard_log_dir is None:
             tensorboard_log_dir = os.path.join(path, "tensorboard")
@@ -397,8 +403,6 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
             start_iteration=start_iteration,
             log_histograms=tensorboard_histograms,
         )
-    else:
-        loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
 
     swanlab_logger = None
     if enable_swanlab:
@@ -467,6 +471,7 @@ if __name__ == "__main__":
          model_path=model_path, path=path, original=False, #is or not origin Fourier-DeepONet
          start_iteration=24000, total_epoch=200, enable_timing=False, 
          split_ratio=0.9, seed=114514,
-         enable_tensorboard=True, tensorboard_log_dir=None, tensorboard_histograms=False,
-         log_period=50,)
+         enable_tensorboard=False, tensorboard_log_dir=None, tensorboard_histograms=False,
+         log_period=50,
+         enable_swanlab=True, swanlab_project="Kwave-DFlower", swanlab_experiment="test0")
 
