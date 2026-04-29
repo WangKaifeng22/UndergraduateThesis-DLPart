@@ -655,10 +655,10 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
 
 if __name__ == "__main__":
-    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test1_DFlower_CLF_128width_0.140625-0.453125/model-294000.pt"
-    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test1_DFlower_CLF_128width_0.140625-0.453125/test_result_294000"
+    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test1_0.140625-0.453125/model-44000.pt"
+    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test1_0.140625-0.453125/test_result_44000"
     main(model_path=MODEL_PATH, result_dir = result_dir,
-     model_type="BranchTrunkFlower", visualize=True, batch_size=32,
+     model_type="FourierDeepONet", visualize=True, batch_size=32,
          split_ratio=0.9, total_data_num = 50000, is_deeponet=True
          ,sosmap_size=(80, 80), samples_plot=100, mm_per_pixel=0.1,
          cache_h5_path="/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125.h5",

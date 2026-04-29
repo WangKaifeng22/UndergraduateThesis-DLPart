@@ -11,6 +11,7 @@ from deepxde.callbacks import Callback
 
 from H5NIODataset import H5NIOConfig, H5NIODataset
 from model_NIO import EncoderUSCT, EncoderUSCTHelm2, NIOUltrasoundCTAbl
+from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 
 class PlottingCallback(Callback):
@@ -195,6 +196,13 @@ def main(
     seed = 114514,
     branch_encoder_cls=EncoderUSCTHelm2,
     branch_encoder_kwargs=None,
+    enable_tensorboard: bool = False,
+    tensorboard_log_dir=None,
+    tensorboard_histograms: bool = False,
+    enable_swanlab: bool = False,
+    swanlab_project="Kwave-NIO",
+    swanlab_experiment=None,
+    log_period = 50,
 ):
     set_seed(seed)
     total_data_num = int(samples_per_config * len(x_params))
@@ -295,16 +303,44 @@ def main(
         period=2000,
     )
 
-    plotter = PlottingCallback(
-        X_test,
-        y_test,
-        period=1000,
-        save_dir=f"{path}/plots",
-        start_iteration=start_iteration,
-    )
+    tensorboard_logger = None
+    loss_logger = None
+    if enable_tensorboard:
+        if tensorboard_log_dir is None:
+            tensorboard_log_dir = os.path.join(path, "tensorboard")
+        tensorboard_logger = TensorBoardCallback(
+            log_dir=tensorboard_log_dir,
+            period=log_period,
+            start_iteration=start_iteration,
+            log_histograms=tensorboard_histograms,
+        )
+    else:
+        loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
 
-    log_period = 50
-    loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
+    swanlab_logger = None
+    if enable_swanlab:
+        # NIO trunk input is a fixed grid; only branch uses mini-batch slicing.
+        X_sample = (X_test[0][:1], X_test[1]) if isinstance(X_test, (tuple, list)) else X_test[:1]
+        swanlab_logger = SwanLabCallback(
+            project=swanlab_project,
+            experiment_name=swanlab_experiment or f"exp_{start_iteration}",
+            log_dir=os.path.join(path, "swanlog"),
+            X_test=X_sample,
+            y_test=y_test[:1],
+            plot_period=1000,
+            period=log_period,
+            start_iteration=start_iteration,
+            config=model_config
+        )
+        plotter = None
+    else:
+        plotter = PlottingCallback(
+            X_test,
+            y_test,
+            period=1000,
+            save_dir=f"{path}/plots",
+            start_iteration=start_iteration,
+        )
 
     timing_logger = None
     if enable_timing:
@@ -314,7 +350,15 @@ def main(
         torch.cuda.empty_cache()
 
     if remaining_iterations > 0:
-        callbacks: list[Callback] = [checker, plotter, loss_logger]
+        callbacks: list[Callback] = [checker]
+        if plotter is not None:
+            callbacks.append(plotter)
+        if tensorboard_logger is not None:
+            callbacks.append(tensorboard_logger)
+        if swanlab_logger is not None:
+            callbacks.append(swanlab_logger)
+        if loss_logger is not None:
+            callbacks.append(loss_logger)
         if timing_logger is not None:
             callbacks.append(timing_logger)
 
@@ -354,6 +398,9 @@ if __name__ == "__main__":
         split_ratio = 0.9,
         seed = 114514,
         branch_encoder_cls=EncoderUSCTHelm2,
+        enable_swanlab=False,
+        swanlab_project="Kwave-NIO",
+        swanlab_experiment=None,
     )
 
 

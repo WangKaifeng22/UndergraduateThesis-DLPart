@@ -928,7 +928,7 @@ def main(
         return
 
     if compare_summary_csvs:
-        labels = compare_model_labels or ['InversionNet', 'NIO', 'Fourier-DeepONet']
+        labels = compare_model_labels or ['InversionNet', 'NIO', 'Fourier-DeepONet-F']
         output_path = compare_output_path
         if not output_path:
             output_path = os.path.join(os.path.dirname(compare_summary_csvs[0]), 'branch_noise_model_comparison.png')
@@ -1158,7 +1158,7 @@ def _parse_args():
     parser.add_argument('--compare-summary-csvs', type=str, nargs='*', default=None, help='Three robustness_summary.csv files (InversionNet, NIO, Fourier-DeepONet) for branch_noise comparison plotting.')
     parser.add_argument('--compare-model-labels', type=str, nargs='*', default=None, help='Three legend labels matching --compare-summary-csvs order.')
     parser.add_argument('--compare-output-path', type=str, default=None, help='Output image path for branch_noise comparison plot.')
-    parser.add_argument('--compare-xscale', type=str, default='linear', choices=['linear', 'log'], help='X-axis scale for comparison plot: linear or log.')
+    parser.add_argument('--compare-xscale', type=str, default='log', choices=['linear', 'log'], help='X-axis scale for comparison plot: linear or log.')
     parser.add_argument('--compare-fourier-summary-csv', type=str, default=None, help='Fourier-DeepONet robustness_summary.csv for branch/trunk/combined scenario comparison plotting.')
     parser.add_argument('--compare-fourier-output-path', type=str, default=None, help='Output image path for Fourier-DeepONet scenario comparison plot.')
     parser.add_argument('--compare-fourier-scenario-labels', type=str, nargs='*', default=None, help='Three legend labels for branch_noise, trunk_noise, and branch_plus_trunk_noise.')

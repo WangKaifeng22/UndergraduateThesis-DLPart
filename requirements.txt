@@ -4,10 +4,12 @@ numpy>=1.24,<2.0
 scipy>=1.10,<2.0
 torch>=2.1,<2.6
 deepxde>=1.10,<2.0
+protobuf>=3.20.3,<4.0
 
 # Data IO and visualization
 h5py>=3.9
 matplotlib>=3.7
+tensorboard>=2.14,<3.0
 
 # Evaluation and analysis
 pandas>=2.0

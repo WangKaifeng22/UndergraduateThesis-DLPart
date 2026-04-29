@@ -12,6 +12,7 @@ from muon import MuonWithAuxAdam
 import json
 import time
 from h5_dataset import H5DeepONetDataset, H5DatasetConfig
+from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 
 class LossHistoryCallback(Callback):
@@ -142,7 +143,7 @@ class PlottingCallback(Callback):
         y_pred_sample = self.model.predict(X_sample)
 
         # 数据处理
-        pred = y_pred_sample[0].squeeze()  # Shape: (384, 384)
+        pred = y_pred_sample[0].squeeze()  
         target = y_true_sample[0].squeeze()
 
         # 反归一化
@@ -223,6 +224,13 @@ def main(
     split_ratio=0.8,
     seed=114514,
     optimizer_name="adamw",
+    enable_tensorboard: bool = False,
+    tensorboard_log_dir=None,
+    tensorboard_histograms: bool = False,
+    enable_swanlab: bool = False,
+    swanlab_project="Kwave-InversionNet",
+    swanlab_experiment=None,
+    log_period=50,
     #resume_training=False,
 ):
     if path is None:
@@ -372,8 +380,33 @@ def main(
 
     plotter = PlottingCallback(X_test, y_test, period=1000, save_dir=f"{path}/plots", start_iteration=start_iteration)
 
-    log_period = 50
-    loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
+    tensorboard_logger = None
+    loss_logger = None
+    if enable_tensorboard:
+        if tensorboard_log_dir is None:
+            tensorboard_log_dir = os.path.join(path, "tensorboard")
+        tensorboard_logger = TensorBoardCallback(
+            log_dir=tensorboard_log_dir,
+            period=log_period,
+            start_iteration=start_iteration,
+            log_histograms=tensorboard_histograms,
+        )
+    else:
+        loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
+
+    swanlab_logger = None
+    if enable_swanlab:
+        swanlab_logger = SwanLabCallback(
+            project=swanlab_project,
+            experiment_name=swanlab_experiment or f"exp_{start_iteration}",
+            log_dir=os.path.join(path, "swanlog"),
+            X_test=(X_test[0][:1], X_test[1][:1]) if isinstance(X_test, tuple) or isinstance(X_test, list) else X_test[:1],
+            y_test=y_test[:1],
+            plot_period=1000,
+            period=log_period,
+            start_iteration=start_iteration,
+            config=model_config
+        )
 
     timing_logger = None
     if enable_timing:
@@ -383,7 +416,13 @@ def main(
         torch.cuda.empty_cache()
 
     if remaining_iterations > 0:
-        callbacks = [checker, plotter, loss_logger]
+        callbacks = [checker, plotter]
+        if tensorboard_logger is not None:
+            callbacks.append(tensorboard_logger)
+        if swanlab_logger is not None:
+            callbacks.append(swanlab_logger)
+        if loss_logger is not None:
+            callbacks.append(loss_logger)
         if timing_logger is not None:
             callbacks.append(timing_logger)
 

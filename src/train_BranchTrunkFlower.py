@@ -9,6 +9,7 @@ from deepxde.callbacks import Callback
 from h5_dataset import H5DeepONetDataset, H5DatasetConfig
 from model_BranchTrunkFlower import BranchTrunkFlower
 from my_train import PlottingCallback
+from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 class Dataset(dde.data.Data):
     def __init__(self, X_train, y_train, X_test, y_test, test_batch_size=256):
@@ -73,6 +74,13 @@ def main(
     start_iteration=0,
     model_path=None,
     enable_timing=False,
+    enable_tensorboard: bool = False,
+    tensorboard_log_dir=None,
+    tensorboard_histograms: bool = False,
+    enable_swanlab: bool = False,
+    swanlab_project="Kwave-DFlower",
+    swanlab_experiment=None,
+    log_period=50,
 ):
     set_seed(seed)
     os.makedirs(path, exist_ok=True)
@@ -180,24 +188,65 @@ def main(
         save_better_only=True,
         period=1000,
     )
-    loss_logger = LossHistoryCallback(period=50, save_dir=f"{path}/logs", start_iteration=start_iteration)
-    plotter = PlottingCallback(
-        X_test,
-        y_test,
-        period=1000,
-        save_dir=f"{path}/plots",
-        start_iteration=start_iteration
-    )
+
+    tensorboard_logger = None
+    loss_logger = None
+    if enable_tensorboard:
+        if tensorboard_log_dir is None:
+            tensorboard_log_dir = os.path.join(path, "tensorboard")
+        tensorboard_logger = TensorBoardCallback(
+            log_dir=tensorboard_log_dir,
+            period=log_period,
+            start_iteration=start_iteration,
+            log_histograms=tensorboard_histograms,
+        )
+    else:
+        loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
+
+
+    swanlab_logger = None
+    if enable_swanlab:
+        X_sample = (X_test[0][:1], X_test[1][:1]) if isinstance(X_test, (tuple, list)) else X_test[:1]
+        swanlab_logger = SwanLabCallback(
+            project=swanlab_project,
+            experiment_name=swanlab_experiment or f"exp_{start_iteration}",
+            log_dir=os.path.join(path, "swanlog"),
+            X_test=X_sample,
+            y_test=y_test[:1],
+            plot_period=1000,
+            period=log_period,
+            start_iteration=start_iteration,
+            config=model_config
+        )
+        plotter = None
+    else:
+        plotter = PlottingCallback(
+            X_test,
+            y_test,
+            period=1000,
+            save_dir=f"{path}/plots",
+            start_iteration=start_iteration
+        )
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
     if remaining_iterations > 0:
+        callbacks = [checker]
+        if tensorboard_logger is not None:
+            callbacks.append(tensorboard_logger)
+        if swanlab_logger is not None:
+            callbacks.append(swanlab_logger)
+        if plotter is not None:
+            callbacks.append(plotter)
+        if loss_logger is not None:
+            callbacks.append(loss_logger)
+
         model.train(
             iterations=remaining_iterations,
             batch_size=batch_size,
-            display_every=50,
-            callbacks=[checker, plotter, loss_logger],
+            display_every=log_period,
+            callbacks=callbacks,
             model_save_path=f"{path}/model",
             disregard_previous_best=True,
             model_restore_path=model_path,
@@ -222,4 +271,11 @@ if __name__ == "__main__":
         start_iteration=0,
         model_path=model_path,
         enable_timing=False,
+        log_period=50,
+        enable_tensorboard=True,
+        tensorboard_log_dir=None,
+        tensorboard_histograms=False,
+        enable_swanlab=False,
+        swanlab_project="Kwave-DFlower",
+        swanlab_experiment=None,
     )

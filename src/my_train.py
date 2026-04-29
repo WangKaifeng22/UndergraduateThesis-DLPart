@@ -11,6 +11,7 @@ import json
 import time
 
 from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 # HDF5 backed dataset (lazy loading)
 from h5_dataset import H5DeepONetDataset, H5DatasetConfig
@@ -206,7 +207,11 @@ meta_h5_path = "/home/wkf/kwave-python/dataset/dataset_shuffle_0.140625-0.453125
 
 def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False, test: bool = False,
          model_path=None, path=None, original=None,
-         start_iteration=0, total_epoch=250, enable_timing: bool = True, split_ratio = 0.8, seed = 114514):
+         start_iteration=0, total_epoch=250, enable_timing: bool = True,
+         enable_tensorboard: bool = False, tensorboard_log_dir=None, tensorboard_histograms: bool = False,
+         enable_swanlab: bool = False, swanlab_project="Kwave-FourierDeepONet", swanlab_experiment=None,
+         split_ratio = 0.8, seed = 114514,
+         log_period = 50):
     set_seed(seed)
     total_data_num = int(samples_per_config * len(x_params))
     test_batch_size = int(batch_size * ((1 - split_ratio) / split_ratio))
@@ -381,16 +386,41 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
         period=1000
     )
 
-    plotter = PlottingCallback(
+    tensorboard_logger = None
+    loss_logger = None
+    if enable_tensorboard:
+        if tensorboard_log_dir is None:
+            tensorboard_log_dir = os.path.join(path, "tensorboard")
+        tensorboard_logger = TensorBoardCallback(
+            log_dir=tensorboard_log_dir,
+            period=log_period,
+            start_iteration=start_iteration,
+            log_histograms=tensorboard_histograms,
+        )
+    else:
+        loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
+
+    swanlab_logger = None
+    if enable_swanlab:
+        swanlab_logger = SwanLabCallback(
+            project=swanlab_project,
+            experiment_name=swanlab_experiment or f"exp_{start_iteration}",
+            log_dir=os.path.join(path, "swanlog"),
+            X_test=(X_test[0][:1], X_test[1][:1]),
+            y_test=y_test[:1],
+            plot_period=1000,
+            period=log_period,
+            start_iteration=start_iteration,
+            config=model_config
+        )
+    else:
+        plotter = PlottingCallback(
         X_test,
         y_test,
         period=1000,
         save_dir=f"{path}/plots",
         start_iteration=start_iteration
-    )
-    log_period = 50
-    loss_logger = LossHistoryCallback(period=log_period, save_dir=f"{path}/logs", start_iteration=start_iteration)
-
+        )
     timing_logger = None
     if enable_timing:
         timing_logger = TimingCallback(period=1, save_dir=f"{path}/logs", start_iteration=start_iteration, sync_cuda=True)
@@ -399,7 +429,15 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
         torch.cuda.empty_cache()
 
     if remaining_iterations > 0:
-        callbacks = [checker, plotter, loss_logger]
+        callbacks = [checker]
+        if tensorboard_logger is not None:
+            callbacks.append(tensorboard_logger)
+        if swanlab_logger is not None:
+            callbacks.append(swanlab_logger)
+        if plotter is not None:
+            callbacks.append(plotter)
+        if loss_logger is not None:
+            callbacks.append(loss_logger)
         if timing_logger is not None:
             callbacks.append(timing_logger)
 
@@ -422,10 +460,13 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test0_original_0.140625-0.453125'
-    model_path = None
+    path = f'./model_{dataset}_{task}_test1_0.140625-0.453125'
+    model_path = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test1_0.140625-0.453125/model-24000.pt"
     os.makedirs(path, exist_ok=True)
     main(dataset=dataset, task=task, batch_size=32, lazy=True, test=False,
-         model_path=model_path, path=path, original=True,
-         start_iteration=0, total_epoch=200, enable_timing=False, split_ratio=0.9, seed=114514)
+         model_path=model_path, path=path, original=False, #is or not origin Fourier-DeepONet
+         start_iteration=24000, total_epoch=200, enable_timing=False, 
+         split_ratio=0.9, seed=114514,
+         enable_tensorboard=True, tensorboard_log_dir=None, tensorboard_histograms=False,
+         log_period=50,)
 

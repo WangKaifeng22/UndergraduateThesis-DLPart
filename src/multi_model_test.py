@@ -249,13 +249,13 @@ def main():
             "path": "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_NIO_test1/model-254000.pt"
         },
         {
-            "name": "FourierDeepONet Variant", 
+            "name": "Fourier-DeepONet-F", 
             "type": "FourierDeepONet", 
             "path": "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test0_0.140625-0.453125/model-230000.pt"
         }
     ]
     
-    result_dir = "/home/wkf/wkf_kwave/Images/multi_model_comparisons"
+    result_dir = "/home/wkf/wkf_kwave/Images/multi_model_comparisons_-F"
     samples_plot = 100 # <<< 这个变量现在控制画图数量，同时也限制模型推理数量
     mm_per_pixel = 0.1
     # =======================================
