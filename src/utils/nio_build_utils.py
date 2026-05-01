@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from model_NIO import EncoderUSCT, EncoderUSCTHelm2
+from models.model_NIO import EncoderUSCT, EncoderUSCTHelm2
 
 
 def extract_nio_build_kwargs(model_init_kwargs: Dict[str, Any] | None) -> Dict[str, int]:

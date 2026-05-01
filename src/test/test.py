@@ -5,85 +5,25 @@ os.environ['DDE_BACKEND'] = 'pytorch'
 
 import h5py
 from matplotlib import colors
-from InversionNet import InversionNet
-from model_BranchTrunkFlower import BranchTrunkFlower
-from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
-from nio_build_utils import (
+from models.InversionNet import InversionNet
+from models.model_BranchTrunkFlower import BranchTrunkFlower
+from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+from utils.nio_build_utils import (
     extract_nio_build_kwargs as _extract_nio_build_kwargs,
     resolve_nio_branch_encoder_cls as _resolve_nio_branch_encoder_cls,
     resolve_nio_branch_encoder_kwargs as _resolve_nio_branch_encoder_kwargs,
 )
-from train_NIO import build_nio
-from multi_data import get_dataset as get_multi_dataset
-from my_data import get_dataset as get_legacy_dataset
-from my_train import samples_per_config as train_samples_per_config
-from utils import *
+from train.train_NIO import build_nio
+from utils.multi_data import get_dataset as get_multi_dataset
+from utils.data import get_dataset as get_legacy_dataset
+from train.train import samples_per_config as train_samples_per_config
+from utils.utils import *
 # HDF5 backed dataset (lazy loading)
-from h5_dataset import H5DeepONetDataset, H5DatasetConfig
-from H5NIODataset import H5NIOConfig, H5NIODataset
-
-# === 直接导入 skimage 用于 NumPy 计算 ===
-try:
-    from skimage.metrics import structural_similarity as ssim_skimage
-except ImportError:
-    print("Warning: scikit-image not found. SSIM calculation will be skipped.")
-    print("Please install it via: pip install scikit-image")
-    ssim_skimage = None
+from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
+from utils.H5NIODataset import H5NIOConfig, H5NIODataset
 
 # 设备配置
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def compute_ssim_numpy(y_true, y_pred, data_range):
-    """
-    计算 SSIM (适配 Numpy 数组)
-    """
-    # 如果没有安装 skimage，直接返回全 0 分数，保证 mean/std 逻辑统一。
-    if ssim_skimage is None:
-        return np.zeros(len(y_true), dtype=np.float32)
-
-    scores = []
-    for i in range(len(y_true)):
-        # y_true[i] shape: (sosmap_size[0], sosmap_size[1])
-        score = ssim_skimage(
-            y_true[i],
-            y_pred[i],
-            data_range=data_range,
-            # 指定 channel_axis=None 表示输入是 (H, W) 的灰度图
-            channel_axis=None
-        )
-        scores.append(score)
-    if not scores:
-        return np.zeros(1, dtype=np.float32)
-    return np.asarray(scores, dtype=np.float32)
-
-
-def compute_pcc_numpy(y_true, y_pred, eps=1e-8):
-    """计算 PCC (皮尔逊相关系数)，返回逐样本分数。"""
-    scores = []
-    for i in range(len(y_true)):
-        true_flat = y_true[i].reshape(-1)
-        pred_flat = y_pred[i].reshape(-1)
-
-        true_std = np.std(true_flat)
-        pred_std = np.std(pred_flat)
-
-        # 常量图像会导致分母趋近 0；这里做稳定处理。
-        if true_std < eps and pred_std < eps:
-            scores.append(1.0)
-            continue
-        if true_std < eps or pred_std < eps:
-            scores.append(0.0)
-            continue
-
-        corr = np.corrcoef(true_flat, pred_flat)[0, 1]
-        if np.isfinite(corr):
-            scores.append(corr)
-
-    if not scores:
-        return np.zeros(1, dtype=np.float32)
-    return np.asarray(scores, dtype=np.float32)
-
 
 def _metric_mean_std(values):
     values = np.asarray(values, dtype=np.float64)

@@ -4,23 +4,21 @@ import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import colors
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-# 导入必要的模块，与 my_test.py 保持一致
-from utils import minmax_denormalize, VMIN, VMAX
-from InversionNet import InversionNet
-from model_BranchTrunkFlower import BranchTrunkFlower
-from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
-from train_NIO import build_nio
-from nio_build_utils import (
+# 导入必要的模块，与 test.py 保持一致
+from utils.utils import minmax_denormalize, VMIN, VMAX
+from models.InversionNet import InversionNet
+from models.model_BranchTrunkFlower import BranchTrunkFlower
+from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+from train.train_NIO import build_nio
+from utils.nio_build_utils import (
     extract_nio_build_kwargs as _extract_nio_build_kwargs,
     resolve_nio_branch_encoder_cls as _resolve_nio_branch_encoder_cls,
     resolve_nio_branch_encoder_kwargs as _resolve_nio_branch_encoder_kwargs,
 )
 
-# 导入 my_test.py 中的数据加载辅助函数
-from my_test import (
+# 导入 test.py 中的数据加载辅助函数
+from test.test import (
     _load_h5_meta,
     _load_full_h5_test_set,
     _load_full_h5_test_set_nio,

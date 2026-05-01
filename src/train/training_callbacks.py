@@ -10,7 +10,7 @@ if not hasattr(np, "bool8"):
 
 import torch
 from deepxde.callbacks import Callback
-from utils import minmax_denormalize
+from utils.utils import minmax_denormalize
 
 try:
     from torch.utils.tensorboard import SummaryWriter

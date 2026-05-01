@@ -9,15 +9,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+os.environ['DDE_BACKEND'] = 'pytorch'
 
-from InversionNet import InversionNet
-from nio_build_utils import (
+from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+
+from models.InversionNet import InversionNet
+from models.model_BranchTrunkFlower import BranchTrunkFlower
+from utils.nio_build_utils import (
     extract_nio_build_kwargs,
     resolve_nio_branch_encoder_cls,
     resolve_nio_branch_encoder_kwargs,
 )
-from train_NIO import build_nio
+from train.train_NIO import build_nio
 
 
 MODEL_TYPE_MAP = {
@@ -162,55 +165,6 @@ def _to_str_list(value: Any, default: List[str]) -> List[str]:
                 pass
         return [part.strip() for part in stripped.split(",") if part.strip()]
     return list(default)
-
-
-def build_branch_trunk_flower(
-    num_parameter: int = 2,
-    width: int = 160,
-    Tx: int = 32,
-    Rx: int = 32,
-    T_steps: int = 1900,
-    H: int = 80,
-    W: int = 80,
-    lifting_dim: int = 160,
-    n_levels: int = 4,
-    num_heads: int = 40,
-    boundary_condition_types: Optional[List[str]] = None,
-    dropout_rate: float = 0.0,
-    regularization: Optional[List[Any]] = None,
-    channel_lift_first: bool = True,
-) -> torch.nn.Module:
-    if boundary_condition_types is None:
-        boundary_condition_types = ["ZEROS"]
-    if regularization is None:
-        regularization = ["l2", 3e-6]
-
-    # DeepXDE chooses backend at import time.
-    os.environ.setdefault("DDE_BACKEND", "pytorch")
-    try:
-        from model_BranchTrunkFlower import BranchTrunkFlower
-    except Exception as exc:
-        raise RuntimeError(
-            "Failed to import BranchTrunkFlower. Ensure deepxde is installed with pytorch backend "
-            "and /home/wkf/wkf_kwave/flowers is available."
-        ) from exc
-
-    return BranchTrunkFlower(
-        num_parameter=num_parameter,
-        width=width,
-        Tx=Tx,
-        Rx=Rx,
-        T_steps=T_steps,
-        H=H,
-        W=W,
-        lifting_dim=lifting_dim,
-        n_levels=n_levels,
-        num_heads=num_heads,
-        boundary_condition_types=boundary_condition_types,
-        dropout_rate=dropout_rate,
-        regularization=regularization,
-        channel_lift_first=channel_lift_first,
-    )
 
 
 def normalize_model_key(model_type: str) -> str:
@@ -401,28 +355,31 @@ def main() -> None:
                     regularization=cfg_kwargs.get("regularization", ["l2", 3e-6]),
                 )
             elif model_key == "branch_trunk_flower":
-                model = build_branch_trunk_flower(
-                    num_parameter=int(cfg_kwargs.get("num_parameter", args.btf_num_parameter)),
-                    width=int(cfg_kwargs.get("width", args.btf_width)),
-                    Tx=int(cfg_kwargs.get("Tx", args.btf_tx)),
-                    Rx=int(cfg_kwargs.get("Rx", args.btf_rx)),
-                    T_steps=int(cfg_kwargs.get("T_steps", args.btf_t_steps)),
-                    H=int(cfg_kwargs.get("H", args.btf_h)),
-                    W=int(cfg_kwargs.get("W", args.btf_w)),
-                    lifting_dim=int(cfg_kwargs.get("lifting_dim", args.btf_lifting_dim)),
-                    n_levels=int(cfg_kwargs.get("n_levels", args.btf_n_levels)),
-                    num_heads=int(cfg_kwargs.get("num_heads", args.btf_num_heads)),
-                    boundary_condition_types=_to_str_list(
-                        cfg_kwargs.get("boundary_condition_types"),
-                        args.btf_boundary_condition_types,
-                    ),
-                    dropout_rate=float(cfg_kwargs.get("dropout_rate", args.btf_dropout_rate)),
-                    regularization=cfg_kwargs.get("regularization", ["l2", 3e-6]),
-                    channel_lift_first=_to_bool(
-                        cfg_kwargs.get("channel_lift_first", args.btf_channel_lift_first),
-                        default=True,
-                    ),
-                )
+                if model_cfg:
+                    model = BranchTrunkFlower(**cfg_kwargs)
+                else:
+                    model = BranchTrunkFlower(
+                        num_parameter=args.btf_num_parameter,
+                        width=args.btf_width,
+                        Tx=args.btf_tx,
+                        Rx=args.btf_rx,
+                        T_steps=args.btf_t_steps,
+                        H=args.btf_h,
+                        W=args.btf_w,
+                        lifting_dim=args.btf_lifting_dim,
+                        n_levels=args.btf_n_levels,
+                        num_heads=args.btf_num_heads,
+                        boundary_condition_types=_to_str_list(
+                            None,
+                            args.btf_boundary_condition_types,
+                        ),
+                        dropout_rate=args.btf_dropout_rate,
+                        regularization=["l2", 3e-6],
+                        channel_lift_first=_to_bool(
+                            args.btf_channel_lift_first,
+                            default=True,
+                        ),
+                    )
             else:
                 raise ValueError(f"Unsupported model key: {model_key}")
 

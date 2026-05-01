@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 
-from model_Unet_CNN import FourierDeepONet
-from model_original import FourierDeepONet_Origin
+from models.model_FourierDeepONetF import FourierDeepONet
+from models.model_FourierDeepONet import FourierDeepONet_Origin
 
 
 _FOURIER_ORIGINAL_ALLOWED_KEYS = {

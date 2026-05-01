@@ -1,14 +1,13 @@
-from utils import *
-
+from utils.utils import *
 os.environ['DDE_BACKEND'] = 'pytorch'
 import deepxde as dde
 import json
 
 from deepxde.callbacks import Callback
 
-from h5_dataset import H5DeepONetDataset, H5DatasetConfig
-from model_BranchTrunkFlower import BranchTrunkFlower
-from my_train import PlottingCallback
+from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
+from models.model_BranchTrunkFlower import BranchTrunkFlower
+from train.train import PlottingCallback
 from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 class Dataset(dde.data.Data):

@@ -1,20 +1,20 @@
-from utils import *
+from utils.utils import *
 # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ['DDE_BACKEND'] = 'pytorch'
 import deepxde as dde
-from multi_data import get_dataset
+from utils.multi_data import get_dataset
 from deepxde.callbacks import Callback
-from soap import SOAP
-from muon import SingleDeviceMuonWithAuxAdam
+from optimizer.soap import SOAP
+from optimizer.muon import SingleDeviceMuonWithAuxAdam
 import json
 import time
 
-from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
 from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 # HDF5 backed dataset (lazy loading)
-from h5_dataset import H5DeepONetDataset, H5DatasetConfig
+from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
 
 
 class PlottingCallback(Callback):

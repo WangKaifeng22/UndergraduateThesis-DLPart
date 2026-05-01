@@ -9,8 +9,8 @@ import numpy as np
 import torch
 from deepxde.callbacks import Callback
 
-from H5NIODataset import H5NIOConfig, H5NIODataset
-from model_NIO import EncoderUSCT, EncoderUSCTHelm2, NIOUltrasoundCTAbl
+from utils.H5NIODataset import H5NIOConfig, H5NIODataset
+from models.model_NIO import EncoderUSCT, EncoderUSCTHelm2, NIOUltrasoundCTAbl
 from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 

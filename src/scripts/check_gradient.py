@@ -33,8 +33,8 @@ import torch
 # DeepXDE uses this env for backend selection.
 os.environ.setdefault("DDE_BACKEND", "pytorch")
 
-from model_Unet_CNN import FourierDeepONet  # noqa: E402
-from utils import loss_func_L1, set_seed  # noqa: E402
+from models.model_FourierDeepONetF import FourierDeepONet  # noqa: E402
+from utils.utils import loss_func_L1, set_seed  # noqa: E402
 
 
 @dataclass
@@ -203,8 +203,8 @@ def print_grad_report(stats: list[GradStats], topk: int = 12, writer: TeeWriter 
 
 
 def get_one_batch_from_h5(h5_path: str, split_ratio: float, batch_size: int, seed: int):
-    from h5_dataset import H5DeepONetDataset, H5DatasetConfig
-    from my_train import samples_per_config, x_params, y_params, sos_root, kwave_root
+    from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
+    from train.train import samples_per_config, x_params, y_params, sos_root, kwave_root
     total_data_num = samples_per_config * len(x_params)
     data = H5DeepONetDataset(
         H5DatasetConfig(h5_path=h5_path, split_ratio=split_ratio, test_batch_size=batch_size,
@@ -219,8 +219,8 @@ def get_one_batch_from_h5(h5_path: str, split_ratio: float, batch_size: int, see
 
 def get_one_batch_from_mat(batch_size: int, seed: int):
     # Mirrors defaults in my_train.py
-    from multi_data import get_dataset
-    from my_train import samples_per_config, x_params, y_params, sos_root, kwave_root
+    from utils.multi_data import get_dataset
+    from train.train import samples_per_config, x_params, y_params, sos_root, kwave_root
     split_ratio = 0.8
     total_data_num = samples_per_config * len(x_params)
 

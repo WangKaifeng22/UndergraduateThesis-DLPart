@@ -1,8 +1,8 @@
+from utils.utils import *
 import argparse
 import csv
 import gc
 import json
-import os
 from typing import Any, Dict, List, Sequence, Tuple
 
 os.environ['DDE_BACKEND'] = 'pytorch'
@@ -12,15 +12,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from InversionNet import InversionNet
-from model_BranchTrunkFlower import BranchTrunkFlower
-from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
-from nio_build_utils import (
+from models.InversionNet import InversionNet
+from models.model_BranchTrunkFlower import BranchTrunkFlower
+from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+from utils.nio_build_utils import (
     extract_nio_build_kwargs as _extract_nio_build_kwargs,
     resolve_nio_branch_encoder_cls as _resolve_nio_branch_encoder_cls,
     resolve_nio_branch_encoder_kwargs as _resolve_nio_branch_encoder_kwargs,
 )
-from my_test import (
+from test.test import (
     _infer_sample_count,
     _load_full_h5_test_set,
     _load_full_h5_test_set_nio,
@@ -30,9 +30,9 @@ from my_test import (
     compute_ssim_numpy,
     plot_velocity_comparison,
 )
-from my_train import samples_per_config as train_samples_per_config
-from train_NIO import build_nio
-from utils import *
+from train.train import samples_per_config as train_samples_per_config
+from train.train_NIO import build_nio
+
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
