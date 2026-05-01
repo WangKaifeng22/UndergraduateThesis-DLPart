@@ -4,10 +4,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 def get_group_norm(channels):
-    # 策略：如果通道数 >= 32，尝试用 32 组；否则用通道数的一半作为组数
-    # 或者简单点：找一个能整除 channels 且最接近 32 的数
-    # 但对于你的网络(全是2的倍数)，下面的逻辑最稳健：
-
     # 优先设为 32，如果 channels 小于 32，则设为 channels/2 (最小8组)
     groups = 32
     if channels < 32:

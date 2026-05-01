@@ -3,15 +3,15 @@ import os
 #os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ['DDE_BACKEND'] = 'pytorch'
 import deepxde as dde
-from InversionNet import InversionNet  # 确保 InversionNet.py 在同目录下
-from multi_data import get_dataset
-from utils import *
+from models.InversionNet import InversionNet  # 确保 InversionNet.py 在同目录下
+from utils.multi_data import get_dataset
+from utils.utils import *
 from deepxde.callbacks import Callback
-from soap import SOAP
-from muon import MuonWithAuxAdam
+from optimizer.soap import SOAP
+from optimizer.muon import MuonWithAuxAdam
 import json
 import time
-from h5_dataset import H5DeepONetDataset, H5DatasetConfig
+from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
 from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 

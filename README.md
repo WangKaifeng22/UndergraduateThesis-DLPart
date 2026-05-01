@@ -1,15 +1,16 @@
 # UndergraduateThesis-DLPart
 
-Deep learning experiments for ultrasound CT (USCT) inverse reconstruction.
+Deep learning experiments for ultrasound computed tomography (USCT) inverse reconstruction.
 This repository includes training, evaluation, and HDF5 preprocessing pipelines for three model families:
 
 - Fourier-DeepONet
+- Fourier-DeepONet-F
 - InversionNet
-- NIO (`NIOUltrasoundCTAbl`)
+- Neural Inverse Operator (NIO)
 
 ## Project Layout
 
-- `src/my_train.py`: Fourier-DeepONet training entry
+- `src/my_train.py`: Fourier-DeepONet-F training entry
 - `src/train_inversionnet.py`: InversionNet training entry
 - `src/train_NIO.py`: NIO training entry
 - `src/my_test.py`: unified evaluation script (supports all three model types)

@@ -5,8 +5,8 @@ from typing import Tuple, Optional
 import numpy as np
 import matplotlib.pyplot as plt
 
-from h5_preprocess import _load_x_container, _extract_time_data
-from utils import KWAVE_CMAP, prepare_visualization_data
+from utils.h5_preprocess import _load_x_container, _extract_time_data
+from utils.utils import KWAVE_CMAP, prepare_visualization_data
 
 
 # ---------------------------------------------------------------------------

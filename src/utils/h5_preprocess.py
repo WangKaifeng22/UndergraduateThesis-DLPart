@@ -6,14 +6,13 @@ from typing import Iterable, List, Tuple, Any
 import numpy as np
 import scipy.io
 
-from utils import (
+from utils.utils import (
     VMIN,
     VMAX,
     PHYSICAL_LIMIT,
     minmax_normalize,
     complex_global_scale_fit,
     normalize_branch_from_complex,
-    inverse_process_sensor_fft,
     log_transform,
 )
 
@@ -778,7 +777,7 @@ def preprocess_to_h5(cfg: H5PreprocessConfig) -> None:
     print(f"Meta written to: {cfg.out_meta_path}")
 
 
-from my_train import samples_per_config, x_params, y_params, sos_root, kwave_root, cache_h5_path, meta_h5_path
+from train.train import samples_per_config, x_params, y_params, sos_root, kwave_root, cache_h5_path, meta_h5_path
 
 if __name__ == "__main__":
     # Example usage (adjust paths)

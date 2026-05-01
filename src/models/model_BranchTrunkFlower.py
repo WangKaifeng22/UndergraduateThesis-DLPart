@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import sys
 from pathlib import Path
 
-_FLOWERS_ROOT = "/home/wkf/wkf_kwave/flowers"
+_FLOWERS_ROOT = "/home/wkf/wkf_kwave/flowers" #https://github.com/t-muser/flowers
 if str(_FLOWERS_ROOT) not in sys.path:
     sys.path.append(str(_FLOWERS_ROOT))
 

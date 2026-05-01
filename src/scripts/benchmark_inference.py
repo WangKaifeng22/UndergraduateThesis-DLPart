@@ -8,7 +8,7 @@ from typing import Any, Dict, Tuple
 import numpy as np
 import torch
 
-from fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
+from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
 
 
 def str2bool(value: Any) -> bool:
@@ -71,8 +71,8 @@ def _load_test_data(
     cache_meta_path: str,
 ):
     import h5py
-    from my_test import _infer_sample_count, _load_full_h5_test_set, _load_full_h5_test_set_nio, _load_h5_meta
-    from my_train import samples_per_config as train_samples_per_config
+    from test.test import _infer_sample_count, _load_full_h5_test_set, _load_full_h5_test_set_nio, _load_h5_meta
+    from train.train import samples_per_config as train_samples_per_config
 
     h5_meta = _load_h5_meta(cache_meta_path)
 
@@ -162,14 +162,14 @@ def _load_test_data(
 
 
 def _build_model(model_type: str, model_init_kwargs: Dict[str, Any], X_test, device: torch.device, is_original: bool = False):
-    from InversionNet import InversionNet
-    from model_BranchTrunkFlower import BranchTrunkFlower
-    from nio_build_utils import (
+    from models.InversionNet import InversionNet
+    from models.model_BranchTrunkFlower import BranchTrunkFlower
+    from utils.nio_build_utils import (
         extract_nio_build_kwargs,
         resolve_nio_branch_encoder_cls,
         resolve_nio_branch_encoder_kwargs,
     )
-    from train_NIO import build_nio
+    from train.train_NIO import build_nio
 
     if model_type in {"FourierDeepONet", "BranchTrunkFlower"}:
         if isinstance(model_init_kwargs, dict):

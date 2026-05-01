@@ -7,6 +7,14 @@ from matplotlib.colors import ListedColormap
 import numpy as np
 import torch
 
+try:
+    from skimage.metrics import structural_similarity as ssim_skimage
+except ImportError:
+    print("Warning: scikit-image not found. SSIM calculation will be skipped.")
+    print("Please install it via: pip install scikit-image")
+    ssim_skimage = None
+
+
 # 定义物理参数用于(反)归一化
 VMIN, VMAX = 1430, 1650
 PHYSICAL_LIMIT = 0.04 # 传感器坐标的物理范围 (米)
@@ -493,112 +501,53 @@ def large_dataset_schedule(step, total_steps=None, total_epochs=None, start_it =
         # 余弦退火
         return 0.5 * (1 + math.cos(math.pi * T_cur / T_max))
 
-def inverse_process_sensor_fft(
-    interp_spectrum: np.ndarray,
-    dt: float,
-    target_f: np.ndarray,
-    n_time: int,
-    *,
-    crop_time: int | None = None,
-    enforce_dc_nyquist_real: bool = True,
-) -> np.ndarray:
-    """把 MATLAB `process_sensor_fft` 的输出(单边、已插值频谱)变回时域信号。
 
-    你给出的 MATLAB 处理流程是：
-      1) 对 time_data 在时间维做 FFT 得到 Y (双边频谱)
-      2) 只保留 [0, Fs/2] 的 half-spectrum: Y_half
-      3) 在 half-spectrum 上对每个传感器做 `interp1(f_half, Y_half, target_f, 'linear', 0)`
-
-    本函数做“近似逆过程”：
-      - 先确定你想要的输出时间步数 `n_time`，从而确定 rFFT 的频率栅格 `f_bins = rfftfreq(n_time, dt)`
-      - 再把 `interp_spectrum(target_f)` 复数插值回 `f_bins`
-      - 最后用 `irfft(..., n=n_time)` 复原时域
-
-    参数
-    - interp_spectrum: 复数数组，形状应为 (..., Nf)
-        典型情况：time_data 是 [Ns, Nr, Nt]，则这里一般是 [Ns, Nr, Nf]
-    - dt: 采样间隔 (秒)，例如 1.8182e-08
-    - target_f: 生成 interp_spectrum 时使用的频率轴 (Hz)，一维，长度 Nf
-        例如 linspace(0, 7.5e6, 1024)
-    - n_time: 你希望逆变换时使用的时间步数（可与原 Nt 不同）。
-        n_time 越大，rFFT 的频率栅格越密(df 越小)。
-    - crop_time: 可选，若给定则在逆变换后只返回前 crop_time 个采样点。
-        典型用法：用较大的 n_time 做更密的频率栅格，再 crop 回网络需要的固定长度。
-
-    关键约定
-    - 频域插值：对实部/虚部分别做线性插值；超出 target_f 范围的频点填 0
-      （对应 MATLAB `interp1(..., 'linear', 0)`）
-    - 归一化：NumPy 的 irfft 与 MATLAB ifft 一样，都会包含 1/N 的缩放
-
-    返回
-    - time_data_rec: 实数数组，形状为 interp_spectrum.shape[:-1] + (out_time,)
-        其中 out_time = crop_time if crop_time is not None else n_time
-
-    注意
-    - 若你后续把频域数据做了全局缩放/clip（例如训练前归一化），逆变换前应先 inverse_scale。
+def compute_ssim_numpy(y_true, y_pred, data_range):
     """
-    if n_time <= 0:
-        raise ValueError(f"n_time must be positive, got {n_time}.")
+    计算 SSIM (适配 Numpy 数组)
+    """
+    # 如果没有安装 skimage，直接返回全 0 分数，保证 mean/std 逻辑统一。
+    if ssim_skimage is None:
+        return np.zeros(len(y_true), dtype=np.float32)
 
-    if crop_time is not None:
-        crop_time = int(crop_time)
-        if crop_time <= 0:
-            raise ValueError(f"crop_time must be positive when provided, got {crop_time}.")
-        if crop_time > n_time:
-            raise ValueError(f"crop_time ({crop_time}) cannot be greater than n_time ({n_time}).")
-
-    interp_spectrum = np.asarray(interp_spectrum)
-    target_f = np.asarray(target_f, dtype=np.float64)
-
-    if target_f.ndim != 1:
-        raise ValueError(f"target_f must be 1D, got shape {target_f.shape}.")
-    if interp_spectrum.shape[-1] != target_f.shape[0]:
-        raise ValueError(
-            f"Last dim of interp_spectrum must match len(target_f). "
-            f"Got {interp_spectrum.shape[-1]} vs {target_f.shape[0]}."
+    scores = []
+    for i in range(len(y_true)):
+        # y_true[i] shape: (sosmap_size[0], sosmap_size[1])
+        score = ssim_skimage(
+            y_true[i],
+            y_pred[i],
+            data_range=data_range,
+            # 指定 channel_axis=None 表示输入是 (H, W) 的灰度图
+            channel_axis=None
         )
-    if not np.all(np.isfinite(target_f)):
-        raise ValueError("target_f contains non-finite values.")
+        scores.append(score)
+    if not scores:
+        return np.zeros(1, dtype=np.float32)
+    return np.asarray(scores, dtype=np.float32)
 
-    # 确保频率轴非降序；若不是则排序并同步重排谱
-    if np.any(np.diff(target_f) < 0):
-        order = np.argsort(target_f)
-        target_f = target_f[order]
-        interp_spectrum = np.take(interp_spectrum, order, axis=-1)
 
-    f_bins = np.fft.rfftfreq(n_time, d=dt)  # (n_time//2 + 1,)
+def compute_pcc_numpy(y_true, y_pred, eps=1e-8):
+    """计算 PCC (皮尔逊相关系数)，返回逐样本分数。"""
+    scores = []
+    for i in range(len(y_true)):
+        true_flat = y_true[i].reshape(-1)
+        pred_flat = y_pred[i].reshape(-1)
 
-    # 复数线性插值：分别插值实部/虚部；超出范围补 0
-    # np.interp 只支持 1D，因此把除最后一维外的维度展平处理
-    lead_shape = interp_spectrum.shape[:-1]
-    n_lead = int(np.prod(lead_shape)) if lead_shape else 1
+        true_std = np.std(true_flat)
+        pred_std = np.std(pred_flat)
 
-    spec2d = interp_spectrum.reshape(n_lead, target_f.shape[0])
-    real2d = np.empty((n_lead, f_bins.shape[0]), dtype=np.float64)
-    imag2d = np.empty((n_lead, f_bins.shape[0]), dtype=np.float64)
+        # 常量图像会导致分母趋近 0；这里做稳定处理。
+        if true_std < eps and pred_std < eps:
+            scores.append(1.0)
+            continue
+        if true_std < eps or pred_std < eps:
+            scores.append(0.0)
+            continue
 
-    x = target_f
-    for i in range(n_lead):
-        y = spec2d[i]
-        real2d[i] = np.interp(f_bins, x, np.real(y), left=0.0, right=0.0)
-        imag2d[i] = np.interp(f_bins, x, np.imag(y), left=0.0, right=0.0)
+        corr = np.corrcoef(true_flat, pred_flat)[0, 1]
+        if np.isfinite(corr):
+            scores.append(corr)
 
-    spec_bins = (real2d + 1j * imag2d).reshape(lead_shape + (f_bins.shape[0],))
-
-    if enforce_dc_nyquist_real:
-        # DC 一定应该是实数
-        spec_bins[..., 0] = np.real(spec_bins[..., 0]) + 0j
-        # 若 n_time 为偶数，则 Nyquist bin 存在且也应为实数
-        if n_time % 2 == 0:
-            spec_bins[..., -1] = np.real(spec_bins[..., -1]) + 0j
-
-    # irfft 假设输入为单边频谱(含 DC 与 Nyquist(若存在))并自动补齐共轭对称
-    time_data_rec = np.fft.irfft(spec_bins, n=n_time, axis=-1)
-
-    # MATLAB ifft 对实信号的结果理论上为实数；这里做一次安全转换
-    time_data_rec = np.real(time_data_rec)
-
-    if crop_time is not None:
-        time_data_rec = time_data_rec[..., :crop_time]
-
-    return time_data_rec
+    if not scores:
+        return np.zeros(1, dtype=np.float32)
+    return np.asarray(scores, dtype=np.float32)

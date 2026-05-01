@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from DeepONetModules import FeedForwardNN, DeepOnetNoBiasOrg
-from FNOModules import FNO_WOR
+from utils.DeepONetModules import FeedForwardNN, DeepOnetNoBiasOrg
+from utils.FNOModules import FNO_WOR
 
 
 def get_group_norm(channels: int):
