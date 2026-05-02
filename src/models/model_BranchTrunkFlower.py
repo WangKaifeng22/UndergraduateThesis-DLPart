@@ -73,6 +73,13 @@ class BranchTrunkFlower(dde.nn.pytorch.NN):
         x = torch.mul(x1, x2)         # broadcast -> [B, width, H, W]
         x = x + self.b
 
+        """print(
+            f"x1_mean={torch.mean(x1).item():.6f}, x2_mean={torch.mean(x2).item():.6f}\n"
+            f"x1_std={torch.std(x1).item():.6f}, x2_std={torch.std(x2).item():.6f}\n"
+            f"x_mean={torch.mean(x).item():.6f}, x_std={torch.std(x).item():.6f}, "
+            f"x_min={torch.min(x).item():.6f}, x_max={torch.max(x).item():.6f}\n"
+        )"""
+
         x = self.flower(x)            # [B, 1, H, W]
         return x.squeeze(1)
 

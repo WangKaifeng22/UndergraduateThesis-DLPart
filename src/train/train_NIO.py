@@ -1,4 +1,10 @@
-from utils import *
+import sys
+from pathlib import Path
+
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+from utils.utils import *
 os.environ["DDE_BACKEND"] = "pytorch"
 
 import json
@@ -11,7 +17,7 @@ from deepxde.callbacks import Callback
 
 from utils.H5NIODataset import H5NIOConfig, H5NIODataset
 from models.model_NIO import EncoderUSCT, EncoderUSCTHelm2, NIOUltrasoundCTAbl
-from training_callbacks import TensorBoardCallback, SwanLabCallback
+from train.training_callbacks import TensorBoardCallback, SwanLabCallback
 
 
 class PlottingCallback(Callback):
@@ -131,7 +137,7 @@ class TimingCallback(Callback):
             f.write(f"{iteration},{dt:.6f}\n")
 
 
-from my_train import samples_per_config, x_params, y_params, cache_h5_path
+from train.train import samples_per_config, x_params, y_params, cache_h5_path
 
 def build_nio(
     seed,

@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 from utils.utils import *
 # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
@@ -11,7 +17,7 @@ import json
 import time
 
 from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
-from training_callbacks import TensorBoardCallback, SwanLabCallback
+from train.training_callbacks import TensorBoardCallback, SwanLabCallback
 
 # HDF5 backed dataset (lazy loading)
 from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
@@ -473,5 +479,5 @@ if __name__ == "__main__":
          split_ratio=0.9, seed=114514,
          enable_tensorboard=False, tensorboard_log_dir=None, tensorboard_histograms=False,
          log_period=50,
-         enable_swanlab=True, swanlab_project="Kwave-DFlower", swanlab_experiment="test0")
+         enable_swanlab=Trues, swanlab_project="Kwave-DFlower", swanlab_experiment="test0")
 

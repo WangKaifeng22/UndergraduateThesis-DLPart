@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
 from utils.utils import *
 os.environ['DDE_BACKEND'] = 'pytorch'
 import deepxde as dde
@@ -7,7 +14,7 @@ from deepxde.callbacks import Callback
 
 from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
 from models.model_BranchTrunkFlower import BranchTrunkFlower
-from train.train import PlottingCallback
+from train import PlottingCallback
 from training_callbacks import TensorBoardCallback, SwanLabCallback
 
 class Dataset(dde.data.Data):
@@ -62,7 +69,7 @@ class LossHistoryCallback(Callback):
         with open(self.filepath, "a", encoding="utf-8") as f:
             f.write(f"{iteration},{loss_train_mean},{loss_test_mean}\n")
 
-from my_train import samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
+from train import samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
 def main(
     h5_path,
     path,
@@ -108,7 +115,7 @@ def main(
     H = 80
     W = 80
     lifting_dim = 160
-    n_levels = 4
+    n_levels = 5
     num_heads = 40
     boundary_condition_types = ["ZEROS"]
     dropout_rate = 0.0
@@ -260,9 +267,9 @@ def main(
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test1_DFlower_CLF_160width_40heads_0.140625-0.453125'
+    path = f'./model_{dataset}_{task}_test2_DFlower_CLF_160width_40heads_5n_0.140625-0.453125'
     os.makedirs(path, exist_ok=True)
-    model_path = None
+    model_path = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test2_DFlower_CLF_160width_40heads_5n_0.140625-0.453125/model-249000.pt"
     main(
         h5_path=cache_h5_path,
         path=path,
@@ -270,14 +277,14 @@ if __name__ == "__main__":
         seed=114514,
         batch_size=32,
         total_epoch=200,
-        start_iteration=0,
+        start_iteration=249000,
         model_path=model_path,
         enable_timing=False,
         log_period=50,
         enable_tensorboard=False,
         tensorboard_log_dir=None,
         tensorboard_histograms=False,
-        enable_swanlab=False,
+        enable_swanlab=True,
         swanlab_project="Kwave-DFlower",
-        swanlab_experiment=None,
+        swanlab_experiment="test2_print_stats",
     )
