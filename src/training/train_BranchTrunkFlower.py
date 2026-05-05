@@ -14,8 +14,8 @@ from deepxde.callbacks import Callback
 
 from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
 from models.model_BranchTrunkFlower import BranchTrunkFlower
-from train import PlottingCallback
-from training_callbacks import TensorBoardCallback, SwanLabCallback
+from training.train import PlottingCallback
+from training.training_callbacks import TensorBoardCallback, SwanLabCallback
 
 class Dataset(dde.data.Data):
     def __init__(self, X_train, y_train, X_test, y_test, test_batch_size=256):
@@ -69,7 +69,7 @@ class LossHistoryCallback(Callback):
         with open(self.filepath, "a", encoding="utf-8") as f:
             f.write(f"{iteration},{loss_train_mean},{loss_test_mean}\n")
 
-from train import samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
+from training.train import samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
 def main(
     h5_path,
     path,
@@ -115,9 +115,10 @@ def main(
     H = 80
     W = 80
     lifting_dim = 160
-    n_levels = 5
+    n_levels = 4
     num_heads = 40
     boundary_condition_types = ["ZEROS"]
+    groups = 40
     dropout_rate = 0.0
     regularization = ["l2", 3e-6]
     channel_lift_first = True
@@ -134,6 +135,7 @@ def main(
         n_levels=n_levels,
         num_heads=num_heads,
         boundary_condition_types=boundary_condition_types,
+        groups=groups,
         dropout_rate=dropout_rate,
         regularization=regularization,
         channel_lift_first=channel_lift_first,
@@ -156,6 +158,7 @@ def main(
             "boundary_condition_types": boundary_condition_types,
             "dropout_rate": dropout_rate,
             "channel_lift_first": channel_lift_first,
+            "groups": groups
         },
         "data": {
             "h5_path": h5_path,
@@ -172,7 +175,7 @@ def main(
 
     model.compile(
         optimizer="adamw",
-        lr=2.5e-3,
+        lr=1e-3,
         loss=loss_func_L1,
         decay=(
             "lambda",
@@ -267,9 +270,9 @@ def main(
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test2_DFlower_CLF_160width_40heads_5n_0.140625-0.453125'
+    path = f'./model_{dataset}_{task}_test3_DFlower_LeakyReLU_0.140625-0.453125'
     os.makedirs(path, exist_ok=True)
-    model_path = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test2_DFlower_CLF_160width_40heads_5n_0.140625-0.453125/model-249000.pt"
+    model_path = None
     main(
         h5_path=cache_h5_path,
         path=path,
@@ -277,7 +280,7 @@ if __name__ == "__main__":
         seed=114514,
         batch_size=32,
         total_epoch=200,
-        start_iteration=249000,
+        start_iteration=0,
         model_path=model_path,
         enable_timing=False,
         log_period=50,
@@ -286,5 +289,5 @@ if __name__ == "__main__":
         tensorboard_histograms=False,
         enable_swanlab=True,
         swanlab_project="Kwave-DFlower",
-        swanlab_experiment="test2_print_stats",
+        swanlab_experiment="test3_LeakyReLU",
     )

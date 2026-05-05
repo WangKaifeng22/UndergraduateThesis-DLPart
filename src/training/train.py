@@ -17,7 +17,7 @@ import json
 import time
 
 from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
-from train.training_callbacks import TensorBoardCallback, SwanLabCallback
+from training.training_callbacks import TensorBoardCallback, SwanLabCallback
 
 # HDF5 backed dataset (lazy loading)
 from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig

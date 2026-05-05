@@ -34,6 +34,7 @@ class BranchTrunkFlower(dde.nn.pytorch.NN):
             n_levels=4,
             num_heads=32,
             boundary_condition_types=["ZEROS"],
+            groups=32,
             dropout_rate=0.0,
             regularization=None,
             channel_lift_first=True,
@@ -62,6 +63,7 @@ class BranchTrunkFlower(dde.nn.pytorch.NN):
             boundary_condition_types=boundary_condition_types,
             dim_meta=0,
             dropout_rate=dropout_rate,
+            groups=groups,
         )
 
         self.b = nn.Parameter(torch.tensor(0.0))

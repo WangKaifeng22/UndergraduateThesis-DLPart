@@ -10,7 +10,7 @@ from utils.utils import minmax_denormalize, VMIN, VMAX
 from models.InversionNet import InversionNet
 from models.model_BranchTrunkFlower import BranchTrunkFlower
 from utils.fourier_model_utils import build_fourier_deeponet_variant, is_original_fourier_deeponet_config
-from train.train_NIO import build_nio
+from training.train_NIO import build_nio
 from utils.nio_build_utils import (
     extract_nio_build_kwargs as _extract_nio_build_kwargs,
     resolve_nio_branch_encoder_cls as _resolve_nio_branch_encoder_cls,
@@ -18,7 +18,7 @@ from utils.nio_build_utils import (
 )
 
 # 导入 test.py 中的数据加载辅助函数
-from test.test import (
+from evaluation.test import (
     _load_h5_meta,
     _load_full_h5_test_set,
     _load_full_h5_test_set_nio,

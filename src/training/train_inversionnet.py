@@ -18,7 +18,7 @@ from optimizer.muon import MuonWithAuxAdam
 import json
 import time
 from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig
-from training_callbacks import TensorBoardCallback, SwanLabCallback
+from training.training_callbacks import TensorBoardCallback, SwanLabCallback
 
 
 class LossHistoryCallback(Callback):
@@ -213,7 +213,7 @@ class Dataset(dde.data.Data):
         y_test_batch = self.test_y[indices]
         return X_test_batch, y_test_batch
 
-from my_train import samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
+from training.train import samples_per_config, x_params, y_params, cache_h5_path, sos_root, kwave_root
 
 
 def main(

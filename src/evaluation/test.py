@@ -13,10 +13,10 @@ from utils.nio_build_utils import (
     resolve_nio_branch_encoder_cls as _resolve_nio_branch_encoder_cls,
     resolve_nio_branch_encoder_kwargs as _resolve_nio_branch_encoder_kwargs,
 )
-from train.train_NIO import build_nio
+from training.train_NIO import build_nio
 from utils.multi_data import get_dataset as get_multi_dataset
 from utils.data import get_dataset as get_legacy_dataset
-from train.train import samples_per_config as train_samples_per_config
+from training.train import samples_per_config as train_samples_per_config
 from utils.utils import *
 # HDF5 backed dataset (lazy loading)
 from utils.h5_dataset import H5DeepONetDataset, H5DatasetConfig

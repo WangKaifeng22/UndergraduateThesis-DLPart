@@ -17,7 +17,7 @@ from deepxde.callbacks import Callback
 
 from utils.H5NIODataset import H5NIOConfig, H5NIODataset
 from models.model_NIO import EncoderUSCT, EncoderUSCTHelm2, NIOUltrasoundCTAbl
-from train.training_callbacks import TensorBoardCallback, SwanLabCallback
+from training.training_callbacks import TensorBoardCallback, SwanLabCallback
 
 
 class PlottingCallback(Callback):
@@ -137,7 +137,7 @@ class TimingCallback(Callback):
             f.write(f"{iteration},{dt:.6f}\n")
 
 
-from train.train import samples_per_config, x_params, y_params, cache_h5_path
+from training.train import samples_per_config, x_params, y_params, cache_h5_path
 
 def build_nio(
     seed,
