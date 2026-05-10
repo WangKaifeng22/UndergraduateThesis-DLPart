@@ -3,6 +3,12 @@ import os
 import json
 os.environ['DDE_BACKEND'] = 'pytorch'
 
+import sys
+from pathlib import Path
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
 import h5py
 from matplotlib import colors
 from models.InversionNet import InversionNet
@@ -293,6 +299,7 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
             model_type_raw = model_config.get("model_type", model_type)
             model_init_kwargs = model_config.get("model_init_kwargs")
             data_cfg = model_config.get("data", None)
+            is_test = model_config.get("test", False)
             is_original = is_original_fourier_deeponet_config(model_config)
             print(f"Loaded model config from: {model_config_path}")
             print(f"Auto model_type from config: {model_type_raw}")
@@ -399,7 +406,7 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
     if model_type in {"FourierDeepONet", "BranchTrunkFlower"}:
         if isinstance(model_init_kwargs, dict):
-            net = BranchTrunkFlower(**model_init_kwargs) if model_type == "BranchTrunkFlower" else build_fourier_deeponet_variant(model_init_kwargs, original=is_original)
+            net = BranchTrunkFlower(**model_init_kwargs) if model_type == "BranchTrunkFlower" else build_fourier_deeponet_variant(model_init_kwargs, original=is_original, test = is_test)
         else:
             trunk_dim = X_test[1].shape[1]
             if model_type == "BranchTrunkFlower":
@@ -423,6 +430,7 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
                 net = build_fourier_deeponet_variant(
                     trunk_dim=trunk_dim,
                     original=is_original,
+                    test=is_test,
                     width=64,
                     modes1=16,
                     modes2=16,
@@ -595,8 +603,8 @@ def main(model_path, result_dir, model_type="FourierDeepONet", visualize=True,
 
 
 if __name__ == "__main__":
-    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test2_DFlower_CLF_160width_40heads_5n_0.140625-0.453125/model-249000.pt"
-    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test2_DFlower_CLF_160width_40heads_5n_0.140625-0.453125/test_result_249000"
+    MODEL_PATH = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test2_testversion_0.140625-0.453125/model-312600.pt"
+    result_dir = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test2_testversion_0.140625-0.453125/test_result_312600"
     main(model_path=MODEL_PATH, result_dir = result_dir,
      model_type="FourierDeepONet", visualize=True, batch_size=32,
          split_ratio=0.9, total_data_num = 50000, is_deeponet=True

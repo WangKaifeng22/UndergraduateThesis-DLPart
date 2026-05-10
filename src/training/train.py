@@ -217,7 +217,8 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
          enable_tensorboard: bool = False, tensorboard_log_dir=None, tensorboard_histograms: bool = False,
          enable_swanlab: bool = False, swanlab_project="Kwave-FourierDeepONet", swanlab_experiment=None,
          split_ratio = 0.8, seed = 114514,
-         log_period = 50):
+         log_period = 50,
+         model_test_version: bool = False):
     set_seed(seed)
     total_data_num = int(samples_per_config * len(x_params))
     test_batch_size = int(batch_size * ((1 - split_ratio) / split_ratio))
@@ -278,6 +279,7 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
         merge_operation=merge_operation,
         use_hfs_block123=use_hfs_block123,
         hfs_patch_size=hfs_patch_size,
+        test = model_test_version,
     )
     model = dde.Model(data, net)
 
@@ -411,6 +413,7 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
         )
 
     swanlab_logger = None
+    plotter = None
     if enable_swanlab:
         swanlab_logger = SwanLabCallback(
             project=swanlab_project,
@@ -470,14 +473,15 @@ def main(dataset, task, resume_training=False, batch_size=32, lazy: bool = False
 if __name__ == "__main__":
     dataset = "50K"
     task = "5x2_configs"
-    path = f'./model_{dataset}_{task}_test1_0.140625-0.453125'
-    model_path = "/home/wkf/wkf_kwave/src/model_50K_5x2_configs_test1_0.140625-0.453125/model-24000.pt"
+    path = f'./model_{dataset}_{task}_test2_testversion_0.140625-0.453125'
+    model_path = None
     os.makedirs(path, exist_ok=True)
     main(dataset=dataset, task=task, batch_size=32, lazy=True, test=False,
          model_path=model_path, path=path, original=False, #is or not origin Fourier-DeepONet
-         start_iteration=24000, total_epoch=200, enable_timing=False, 
+         start_iteration=0, total_epoch=200, enable_timing=False, 
          split_ratio=0.9, seed=114514,
          enable_tensorboard=False, tensorboard_log_dir=None, tensorboard_histograms=False,
          log_period=50,
-         enable_swanlab=Trues, swanlab_project="Kwave-DFlower", swanlab_experiment="test0")
+         enable_swanlab=True, swanlab_project="Fourier-DeepONet-testversion", swanlab_experiment="0",
+         model_test_version=True)
 

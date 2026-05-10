@@ -6,7 +6,7 @@ import torch.nn.functional as F
 torch.backends.cudnn.benchmark = True
 
 
-class FourierDeepONet(dde.nn.pytorch.NN):
+class FourierDeepONet_test(dde.nn.pytorch.NN):
     """MIONet with two input functions for Cartesian product format."""
 
     def __init__(
@@ -51,7 +51,7 @@ class FourierDeepONet(dde.nn.pytorch.NN):
                 f"{self.merge_operation} operation to be implimented"
             )
         x = x + self.b
-        x = self.merger(x, x2)
+        x = self.merger(x)
 
         return x
 

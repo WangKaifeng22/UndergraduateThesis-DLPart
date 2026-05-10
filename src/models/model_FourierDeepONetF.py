@@ -50,7 +50,7 @@ class FourierDeepONet(dde.nn.pytorch.NN):
                 f"{self.merge_operation} operation to be implimented"
             )
         x = x + self.b
-        x = self.merger(x, x2)
+        x = self.merger(x)
 
         return x
 
@@ -530,12 +530,12 @@ class decoder(nn.Module):
 
         return x.squeeze(1)
 
-    def forward(self, x, meta=None):
+    def forward(self, x):
 
         x = self._forward_block0(x)
-        x = self._forward_block1(x, meta)
-        x = self._forward_block2(x, meta)
-        x = self._forward_block3(x, meta)
+        x = self._forward_block1(x)
+        x = self._forward_block2(x)
+        x = self._forward_block3(x)
         x = self._forward_block4_out(x)
 
         return x

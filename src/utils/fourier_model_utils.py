@@ -2,6 +2,7 @@ from typing import Any, Dict, Optional
 
 from models.model_FourierDeepONetF import FourierDeepONet
 from models.model_FourierDeepONet import FourierDeepONet_Origin
+from models.model_FourierDeepONet_test import FourierDeepONet_test
 
 
 _FOURIER_ORIGINAL_ALLOWED_KEYS = {
@@ -31,6 +32,7 @@ def build_fourier_deeponet_variant(
     merge_operation: str = "mul",
     use_hfs_block123: bool = True,
     hfs_patch_size=(16, 8, 4),
+    test: bool = False,
 ):
     if regularization is None:
         regularization = ["l2", 3e-6]
@@ -49,6 +51,8 @@ def build_fourier_deeponet_variant(
 
     if original:
         return FourierDeepONet_Origin(**kwargs)
+    elif test:
+        return FourierDeepONet_test(**kwargs)
 
     kwargs.setdefault("use_hfs_block123", use_hfs_block123)
     kwargs.setdefault("hfs_patch_size", hfs_patch_size)

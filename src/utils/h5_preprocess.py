@@ -318,7 +318,7 @@ def _probe_shapes(
 
 def _process_one_pair(
         x_path: str,
-    y_path: str | None,
+        y_path: str | None,
         dtype_str: str,
         branch_scale: float,
         *,
